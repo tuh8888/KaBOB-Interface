@@ -10,7 +10,6 @@ from franz.openrdf.repository.repositoryconnection import RepositoryConnection
 from franz.openrdf.sail.allegrographserver import AllegroGraphServer
 
 import KaBOB_Constants
-import KaBOB_Server
 from MOPs import MOPsManager
 
 logging.basicConfig(level=logging.DEBUG)
@@ -319,35 +318,50 @@ class KaBOBInterface:
 
 class OpenKaBOB:
     log = logging.getLogger('OpenKaBOB')
+    HOST = "HOST"
+    PORT = "PORT"
+    USER = "USER"
+    PASSWORD = "PASSWORD"
+    CATALOG = "CATALOG"
+    RELEASE = "RELEASE"
+    INSTANCE_RELEASE = "INSTANCE_RELEASE"
 
-    def __init__(self):
+    def __init__(self, credentials_file):
         self.kabob = None
         self.kabob_repository = None
+        self.creds = {}
+        with open(credentials_file) as f:
+            for line in f.readlines():
+                key_value = line.strip().split(':')
+                print(key_value)
+                if len(key_value) == 2:
+                    self.creds[key_value[0]] = key_value[1]
+
 
     def connect_to_kabob(self):
         self.log.debug("Connecting to AllegroGraph server --" +
-                       "host:'%s' port:%s" % (KaBOB_Server.HOST, KaBOB_Server.PORT))
-        kabob_server = AllegroGraphServer(KaBOB_Server.HOST, KaBOB_Server.PORT,
-                                          KaBOB_Server.USER, KaBOB_Server.PASSWORD)
+                       "host:'%s' port:%s" % (self.creds[self.HOST], self.creds[self.PORT]))
+        kabob_server = AllegroGraphServer(self.creds[self.HOST], int(self.creds[self.PORT]),
+                                          self.creds[self.USER], self.creds[self.PASSWORD])
 
-        if KaBOB_Server.CATALOG in kabob_server.listCatalogs() or KaBOB_Server.CATALOG == '':
-            kabob_catalog = kabob_server.openCatalog(KaBOB_Server.CATALOG)
+        if self.creds[self.CATALOG] in kabob_server.listCatalogs() or self.creds[self.CATALOG] == '':
+            kabob_catalog = kabob_server.openCatalog(self.creds[self.CATALOG])
 
-            if KaBOB_Server.RELEASE in kabob_catalog.listRepositories():
+            if self.creds[self.RELEASE] in kabob_catalog.listRepositories():
                 mode = Repository.OPEN
-                self.kabob_repository = kabob_catalog.getRepository(KaBOB_Server.RELEASE, mode)
+                self.kabob_repository = kabob_catalog.getRepository(self.creds[self.RELEASE], mode)
                 self.kabob = self.kabob_repository.getConnection()
 
                 # print('Repository %s is up!' % self.kabob_repository.getDatabaseName())
                 # print('It contains %d statement(s).' % self.kabob.size())
             else:
-                print('%s does not exist' % KaBOB_Server.RELEASE)
+                print('%s does not exist' % self.creds[self.RELEASE])
                 print("Available repositories in catalog '%s':" % kabob_catalog.getName())
                 for repo_name in kabob_catalog.listRepositories():
                     print('  - ' + repo_name)
 
         else:
-            print('%s does not exist' % KaBOB_Server.CATALOG)
+            print('%s does not exist' % self.creds[self.CATALOG])
             print('Available catalogs:')
             for cat_name in kabob_server.listCatalogs():
                 if not cat_name:
@@ -357,11 +371,11 @@ class OpenKaBOB:
 
     # Potentially better alternate method
     def alt_connect_to_kabob(self):
-        self.kabob = ag_connect(KaBOB_Server.RELEASE,
-                                host=KaBOB_Server.HOST,
-                                port=KaBOB_Server.PORT,
-                                user=KaBOB_Server.USER,
-                                password=KaBOB_Server.PASSWORD,
+        self.kabob = ag_connect(self.creds[self.RELEASE],
+                                host=self.creds[self.HOST],
+                                port=int(self.creds[self.PORT]),
+                                user=self.creds[self.USER],
+                                password=self.creds[self.PASSWORD],
                                 create=False,
                                 clear=False)
 
