@@ -2,43 +2,49 @@ import math
 
 import networkx as nx
 import matplotlib.pyplot as plt
-from typing import List
+from typing import List, Callable
 
 
-class MOPsManager:
+class MOPs(nx.MultiDiGraph):
     type_mop = "mop"
     type_instance = "instance"
 
-    def __init__(self):
-        self.abstraction_hierarchy = nx.MultiDiGraph()
-        # self.slot_graph = nx.MultiDiGraph()
+    def __init__(self, **attr):
+        super().__init__(**attr)
 
     '''
     ADDERS
     '''
 
-    def add_mop(self, mop, name: str = None, frame_type: str = type_mop, abstractions: List = None):
-        if mop not in self.abstraction_hierarchy:
-            self.abstraction_hierarchy.add_node(mop, name=name, frame_type=frame_type)
+    def add_frame(self, frame, label: str = None, frame_type: str = type_mop, abstractions: List = None):
+        if frame not in self:
+            self.add_node(frame, label=label, frame_type=frame_type)
 
         if abstractions is not None:
-            if mop in abstractions:
-                abstractions.remove(mop)
-            self.update_abstractions(mop, abstractions)
-            [self.abstraction_hierarchy.add_edge(mop, abstraction) for abstraction in abstractions]
+            if frame in abstractions:
+                abstractions.remove(frame)
+            self.update_abstractions(frame, abstractions)
+            [self.add_edge(frame, abstraction) for abstraction in abstractions]
 
-    def add_instance(self, name, abstractions=None):
-        return self.add_mop(name, frame_type=self.type_instance, abstractions=abstractions)
+    def add_instance(self, label, abstractions=None):
+        return self.add_frame(label, frame_type=self.type_instance, abstractions=abstractions)
+
+    def add_slot(self, mop, role, role_label, fillers: str or List[str]) -> None:
+        if mop != role:
+            if not isinstance(fillers, list):
+                fillers = [fillers]
+            for filler in fillers:
+                self.add_edge(mop, filler, filler=role, label=role_label)
 
     '''
     CHECKERS
     '''
 
-    def is_mop(self, name):
-        return nx.get_node_attributes(self.abstraction_hierarchy, 'frame_type')[name] == self.type_mop
+    def is_mop(self, frame):
+        return nx.get_node_attributes(self, 'frame_type')[frame] == self.type_mop
 
-    def is_instance(self, name):
-        return nx.get_node_attributes(self.abstraction_hierarchy, 'frame_type')[name] == self.type_instance
+    def is_instance(self, frame):
+        return nx.get_node_attributes(self, 'frame_type')[frame] == self.type_instance
 
     def has_slot(self, instance, role, filler):
         self.is_abstraction(filler, self.inherit_filler(instance, role))
@@ -60,24 +66,27 @@ class MOPsManager:
 
         return False
 
+    def is_strict_abstraction(self, specialization, abstraction):
+        return abstraction is not specialization and self.is_abstraction(abstraction, specialization)
+
     '''
     INHERITANCE
     '''
 
-    def inherit(self, name, fn):
-        for abstraction in self.get_all_abstractions(name):
+    def inherit(self, mop, fn):
+        for abstraction in self.get_all_abstractions(mop):
             if fn(abstraction) is not None:
                 return abstraction
 
-    def inherit_filler(self, name, role):
-        return self.inherit(name,
-                            lambda abstraction: self.abstraction_hierarchy.get_edge_data(abstraction, role)['filler'])
+    def inherit_filler(self, frame, role):
+        return self.inherit(frame,
+                            lambda abstraction: self.get_edge_data(abstraction, role)['filler'])
 
-    def get_all_abstractions(self, name):
-        if name is not None:
+    def get_all_abstractions(self, frame):
+        if frame is not None:
             immediate_parents = []
-            if name in self.abstraction_hierarchy:
-                immediate_parents = self.abstraction_hierarchy.neighbors(name)
+            if frame in self:
+                immediate_parents = self.neighbors(frame)
 
             all_abstractions = list(immediate_parents)
             for parent in list(immediate_parents):
@@ -86,12 +95,12 @@ class MOPsManager:
             return all_abstractions
 
     def unlink_abstraction(self, specialization, abstraction):
-        self.abstraction_hierarchy.remove_edge(specialization, abstraction)
+        self.remove_edge(specialization, abstraction)
 
-    def unlink_old_abstractions(self, name, old_abstractions, new_abstractions):
+    def unlink_old_abstractions(self, frame, old_abstractions, new_abstractions):
         for old_abstraction in list(old_abstractions):
             if old_abstraction not in new_abstractions:
-                self.unlink_abstraction(name, old_abstraction)
+                self.unlink_abstraction(frame, old_abstraction)
 
     def link_abstraction(self, specialization, abstraction):
         if self.is_abstraction(abstraction, specialization):
@@ -103,23 +112,23 @@ class MOPsManager:
             print(err)
             return
 
-        self.abstraction_hierarchy.add_edge(specialization, abstraction)
+        self.add_edge(specialization, abstraction)
 
-    def link_new_abstractions(self, name, old_abstractions, new_abstractions):
+    def link_new_abstractions(self, frame, old_abstractions, new_abstractions):
         for new_abstraction in new_abstractions:
             if new_abstraction not in old_abstractions:
-                if name == new_abstraction:
-                    raise AbstractionException(name, new_abstraction)
+                if frame == new_abstraction:
+                    raise AbstractionException(frame, new_abstraction)
                 else:
-                    self.link_abstraction(name, new_abstraction)
+                    self.link_abstraction(frame, new_abstraction)
 
-    def update_abstractions(self, name, abstractions):
-        old_abstractions = self.abstraction_hierarchy.neighbors(name)
+    def update_abstractions(self, frame, abstractions):
+        old_abstractions = self.neighbors(frame)
         new_abstractions = set(abstractions)
 
         if old_abstractions != new_abstractions:
-            self.unlink_old_abstractions(name, old_abstractions, new_abstractions)
-            self.link_new_abstractions(name, old_abstractions, new_abstractions)
+            self.unlink_old_abstractions(frame, old_abstractions, new_abstractions)
+            self.link_new_abstractions(frame, old_abstractions, new_abstractions)
 
     '''
     GETTERS
@@ -129,13 +138,13 @@ class MOPsManager:
         if self.is_instance(abstraction) and self.has_slots(abstraction, slots):
             return list(abstraction)
         else:
-            return [instance for specialization in self.abstraction_hierarchy.predecessors(abstraction)
+            return [instance for specialization in self.predecessors(abstraction)
                     for instance in self.get_instances(specialization, slots)]
 
     def get_root_frames(self):
         roots = []
-        [roots.append(frame) for frame in self.abstraction_hierarchy
-         if self.abstraction_hierarchy.successors(frame) is None]
+        [roots.append(frame) for frame in self
+         if self.successors(frame) is None]
         return roots
 
     '''
@@ -143,153 +152,45 @@ class MOPsManager:
     '''
 
     def clear_frames(self):
-        self.abstraction_hierarchy.clear()
-
-    def is_strict_abstraction(self, specialization, abstraction):
-        return abstraction is not specialization and self.is_abstraction(abstraction, specialization)
-
-    # def show_frame(self, name_or_frame, max_depth=2):
-    #     self.pretty_print_frame_info(name_or_frame, 0, max_depth)
-    #
-    # def pretty_print_frame_info(self, x, depth, max_depth):
-    #     if frame in self.abstraction_hierarchy and depth != max_depth:
-    #         self.pretty_print_frame_name(frame, depth)
-    #         self.pretty_print_frame_type(frame, depth)
-    #         self.pretty_print_frame_abstractions(frame, depth, max_depth)
-    #         if isinstance(frame, MOP):
-    #             self.pretty_print_frame_slots(frame, depth, max_depth)
-    #
-    # @staticmethod
-    # def pretty_print_frame_name(frame, depth):
-    #     print("\t" * depth + "NAME %s" % frame.name)
-    #
-    # @staticmethod
-    # def pretty_print_frame_type(frame, depth):
-    #     print("\t" * depth + "TYPE %s" % type(frame))
-    #
-    # def pretty_print_frame_abstractions(self, frame, depth, max_depth):
-    #     for abstraction in frame.abstractions:
-    #         name = abstraction.name if isinstance(abstraction, Frame) else abstraction
-    #         print("\t" * depth + "ISA %s" % name)
-    #         self.pretty_print_frame_info(abstraction, depth + 1, max_depth)
-    #
-    # def pretty_print_frame_slots(self, mop, depth, max_depth):
-    #     for slot in mop.slots.values():
-    #         print("\t" * depth + "ROLE %s" % slot.role)
-    #         if isinstance(slot.filler, Frame):
-    #             self.pretty_print_frame_info(slot.filler, depth + 1, max_depth)
-    #         else:
-    #             print("\t" * depth + "FILLER %s" % slot.filler)
-    #
-    # def to_mop(self, x, create=False):
-    #     if self.is_mop(x):
-    #         return self.mops.get(x)
-    #     if create:
-    #         return MOP(name=x)
-    def add_slot(self, mop, role, role_name, fillers: str or List[str]) -> None:
-
-        if not isinstance(fillers, list):
-            fillers = [fillers]
-        for filler in fillers:
-            self.abstraction_hierarchy.add_edge(mop, filler, filler=role, name=role_name)
+        self.clear()
 
     def get_filler(self, mop, role) -> str:
-        return self.abstraction_hierarchy.get_edge_data(mop, role, 'filler')[0]
+        return self.get_edge_data(mop, role, 'filler')[0]
 
-    def draw_mops(self):
+    '''
+    DRAWING
+    '''
 
-        edges = self.abstraction_hierarchy.edges(keys=True, data=True)
-        edges = ((u, v, k) for (u, v, k, filler) in edges if not filler)
-        g = self.abstraction_hierarchy.edge_subgraph(edges)
-        out_loc = "images/abstraction_hierarchy.png"
-        # plt.figure(None, figsize=(math.sqrt(g.number_of_nodes()), math.sqrt(g.number_of_nodes())))
-        # labels = dict((n, d['name']) if 'name' in d.keys() else (n, n) for n, d in g.nodes(data=True))
-        # nx.draw(g, labels=labels, with_labels=True)
-        # plt.savefig(out_loc)
-        self.draw_graph(g, out_loc)
+    def draw_mops(self, layout: Callable=nx.spring_layout):
+        self.draw_graph("images/full_graph.png", layout=layout)
 
-        edges = self.abstraction_hierarchy.edges(keys=True, data=True)
-        edges = ((u, v, k) for (u, v, k, filler) in edges if filler)
-        g = self.abstraction_hierarchy.edge_subgraph(edges)
-        out_loc = "images/slot_graph.png"
-        self.draw_graph(g, out_loc)
+        edges = ((u, v, k) for (u, v, k, filler) in self.edges(keys=True, data=True) if not filler)
+        self.draw_graph("images/abstraction_hierarchy.png", edges=edges, layout=layout)
 
-    @staticmethod
-    def draw_graph(g, out_loc):
+        edges = ((u, v, k) for (u, v, k, filler) in self.edges(keys=True, data=True) if filler)
+        self.draw_graph("images/slot_graph.png", edges=edges, layout=layout)
 
-        plt.figure(None, figsize=(math.sqrt(g.number_of_nodes() * g.number_of_edges()), math.sqrt(g.number_of_nodes() * g.number_of_edges())))
-        pos = nx.spring_layout(g, iterations=1000)
-        labels = dict((n, d['name']) if 'name' in d.keys() else (n, n) for n, d in g.nodes(data=True))
-        edge_labels = dict([((u, v), d['name']) for u, v, d in g.edges(data=True) if 'name' in d.keys()])
+    def draw_graph(self, out_loc: str, edges=None, layout: Callable=nx.spring_layout):
 
+        if edges:
+            g = self.edge_subgraph(edges)
+        else:
+            g = self
+
+        size = math.sqrt(g.number_of_nodes() * g.number_of_edges()) / 2
+        plt.figure(None, figsize=(size, size))
+
+        labels = dict((n, d['label']) if 'label' in d.keys() else (n, n) for n, d in g.nodes(data=True))
+        edge_labels = dict([((u, v), d['label']) for u, v, d in g.edges(data=True) if 'label' in d.keys()])
+
+        pos = layout(g)
         nx.draw(g, pos, labels=labels, with_labels=True)
         nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels)
+
         plt.savefig(out_loc)
+        plt.close()
 
 
 class AbstractionException(Exception):
     def __init__(self, specialization, abstraction):
         self.message = '%s can\'t be an abstraction of %s' % (specialization, abstraction)
-
-# class Slot:
-#     role = ""
-#     filler = ""
-#     constraint = ""
-#
-#     def __init__(self, role, filler, constraint):
-#         self.constraint = constraint
-#         self.filler = filler
-#         self.role = role
-#
-#
-# class Frame(nx.):
-#
-#     def __init__(self, name):
-#         self.name = name
-#         self.abstractions = set()
-#         self.slots = {}
-#
-#     def add_abstraction(self, abstraction):
-#         self.abstractions.add(abstraction)
-#
-#     def add_slot(self, role, filler, constraint=None):
-#         """
-#         :type role: franz.openrdf.model.URI
-#         :type filler: franz.openrdf.model.URI
-#         :type constraint: str
-#         """
-#         if self.slots.get(role):
-#             self.add_filler(role, filler, constraint)
-#         else:
-#             self.slots[role] = [Slot(role, filler, constraint)]
-#
-#     def add_filler(self, role, filler, constraint):
-#         for slot in self.slots[role]:
-#             if slot.filler == filler:
-#                 return
-#             else:
-#                 self.slots[role].append(Slot(role, filler, constraint))
-#
-#     def __str__(self):
-#         return "frame -> name: %s abstractions: %s" % (self.name, self.abstractions)
-#
-#     def get_filler(self, role):
-#         slot = self.slots.get(role)
-#         if slot:
-#             return slot.filler
-#
-#
-# class MOP(Frame):
-#
-#     def __init__(self, name):
-#         super().__init__(name)
-#         self.specializations = set()
-#
-#     def add_specialization(self, specialization):
-#         self.specializations.add(specialization)
-#
-#
-# class Instance(Frame):
-#
-#     def __init__(self, name):
-#         super().__init__(name)

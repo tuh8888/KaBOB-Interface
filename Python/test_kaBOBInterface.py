@@ -18,7 +18,7 @@ class TestKaBOBInterface(TestCase):
 
     def test_mopify(self):
         with OpenKaBOB("KaBOB_credentials.txt") as kabob:
-            interface = KaBOBInterface(kabob, max_depth=1)
+            interface = KaBOBInterface(kabob)
 
             bio_p53 = interface.bio(interface.create_uri(self.p53))
 

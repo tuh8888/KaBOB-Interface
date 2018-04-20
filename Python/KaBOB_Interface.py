@@ -1,6 +1,7 @@
 import logging
 import warnings
-from typing import List
+from typing import List, Callable
+import networkx as nx
 
 from franz.openrdf.connect import ag_connect
 from franz.openrdf.model import Literal, Statement, Value
@@ -11,7 +12,7 @@ from franz.openrdf.repository.repositoryconnection import RepositoryConnection
 from franz.openrdf.sail.allegrographserver import AllegroGraphServer
 
 import KaBOB_Constants
-from MOPs import MOPsManager
+from MOPs import MOPs
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -27,13 +28,13 @@ class KaBOBInterface:
 
     def __init__(self, conn: RepositoryConnection, max_depth=None):
         self.max_depth = max_depth
-        self.mopsManager = MOPsManager()
+        self.mops = MOPs()
         self.kabob = conn
         [conn.setNamespace(name, value) for name, value in KaBOB_Constants.NAMESPACE_ASSOCIATIONS.items()]
         self.role_fillers = {}
 
-    def draw(self):
-        self.mopsManager.draw_mops()
+    def draw(self, layout: Callable=nx.spring_layout):
+        self.mops.draw_mops(layout=layout)
 
     def mopify(self, mop: str or URI, depth: int=0) -> URI or Literal:
         node: URI or Literal = mop \
@@ -42,7 +43,7 @@ class KaBOBInterface:
 
         if not self.is_mopifyable(node):
             return node
-        elif node in self.mopsManager.abstraction_hierarchy:
+        elif node in self.mops:
             return node
         elif not self.is_bio(node):
             self.log.warning("\t" * depth + "Trivial mopification of non-BIO-world node %s" % node)
@@ -55,7 +56,7 @@ class KaBOBInterface:
     def create_kabob_mop(self, node: URI or Literal, depth: int, is_trivial: bool=False) -> URI or Literal:
         mop_name: str = self.instance_name(node) if self.is_bio_instance(node) else self.node_print_name(node)
         self.log.debug("\t" * depth + "> " + mop_name)
-        if not is_trivial and not depth or depth < self.max_depth:
+        if not is_trivial and (self.max_depth is None or depth < self.max_depth):
             superclasses = self.get_superclasses(node)
             parents = []
             if superclasses:
@@ -66,20 +67,20 @@ class KaBOBInterface:
             if parents and self.is_bio_instance(node):
                 warnings.warn(str(mop_name) + " is an instance and a subClass")
 
-            self.mopsManager.add_mop(node, name=mop_name,
-                                     abstractions=[self.mopify(parent, depth + 1) for parent in parents])
+            self.mops.add_frame(node, label=mop_name,
+                                abstractions=[self.mopify(parent, depth + 1) for parent in parents])
             self.create_slots(node, depth + 1)
             # self.infer_inverse_relations(name, depth)
 
         else:
-            self.mopsManager.add_mop(node, name=mop_name)
+            self.mops.add_frame(node, label=mop_name)
         self.log.debug("\t" * depth + "< " + mop_name)
 
         return node
 
     def create_slots(self, main_node: Value, depth: int) -> None:
         equivalent_nodes = [main_node]  # + self.get_equivalent_classes(main_node)
-        self.mopsManager.add_slot(main_node, self.KaBOB_IDs, self.KaBOB_IDs, equivalent_nodes)
+        # self.mopsManager.add_slot(main_node, self.KaBOB_IDs, self.KaBOB_IDs, equivalent_nodes)
 
         for node in equivalent_nodes:
             superclasses = self.get_superclasses(node)
@@ -88,16 +89,16 @@ class KaBOBInterface:
                     if self.is_restriction(superclass):
                         restriction = superclass
                         role = self.get_restriction_property(restriction)
-                        self.mopsManager.add_slot(main_node,
-                                                  role,
-                                                  self.get_role_name(role),
-                                                  self.mopify(self.get_restriction_value(restriction), depth))
+                        self.mops.add_slot(main_node,
+                                           role,
+                                           self.get_role_name(role),
+                                           self.mopify(self.get_restriction_value(restriction), depth))
             for edge in self.get_outgoing_edges(node):
                 if edge.getURI() not in KaBOB_Constants.NOT_A_SLOT:
-                    self.mopsManager.add_slot(main_node,
-                                              edge,
-                                              self.get_role_name(edge),
-                                              [self.mopify(filler, depth)
+                    self.mops.add_slot(main_node,
+                                       edge,
+                                       self.get_role_name(edge),
+                                       [self.mopify(filler, depth)
                                                for filler in self.agraph_get_objects(node, edge)])
 
     def is_bio_instance(self, node: URI) -> bool:
@@ -261,7 +262,7 @@ class KaBOBInterface:
             self.log.warning("\t" * depth + "List has no node first: %s" % node)
 
     def mop_to_nodes(self, mop):
-        return self.mopsManager.get_filler(mop, self.KaBOB_IDs)
+        return self.mops.get_filler(mop, self.KaBOB_IDs)
 
     # def lookup_mop(self, key):
     #     return self.find_mop(key) or (
