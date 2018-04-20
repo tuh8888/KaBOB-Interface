@@ -8,7 +8,7 @@ class TestKaBOBInterface(TestCase):
     p53_label_expected = "cellular tumor antigen p53 (human)"
 
     def test_node_print_name(self):
-        with OpenKaBOB() as kabob:
+        with OpenKaBOB("KaBOB_credentials.txt") as kabob:
             interface = KaBOBInterface(kabob)
 
             p53_label = interface.node_print_name(self.p53)
@@ -17,10 +17,12 @@ class TestKaBOBInterface(TestCase):
                 self.fail("Label for p53 was %s but should have been %s" % (p53_label, self.p53_label_expected))
 
     def test_mopify(self):
-        with OpenKaBOB() as kabob:
-            interface = KaBOBInterface(kabob)
+        with OpenKaBOB("KaBOB_credentials.txt") as kabob:
+            interface = KaBOBInterface(kabob, max_depth=1)
 
             bio_p53 = interface.bio(interface.create_uri(self.p53))
 
-            interface.mopify(bio_p53, 0)
+            interface.mopify(bio_p53)
+
+            interface.draw()
             # interface.mopsManager.show_frame(interface.node_print_name(bio_p53))

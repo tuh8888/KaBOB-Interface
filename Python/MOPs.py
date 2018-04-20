@@ -1,4 +1,7 @@
+import math
+
 import networkx as nx
+import matplotlib.pyplot as plt
 from typing import List
 
 
@@ -7,37 +10,25 @@ class MOPsManager:
     type_instance = "instance"
 
     def __init__(self):
-        self.abstraction_hierarchy = nx.DiGraph()
-        self.slot_graph = nx.MultiDiGraph()
+        self.abstraction_hierarchy = nx.MultiDiGraph()
+        # self.slot_graph = nx.MultiDiGraph()
 
     '''
     ADDERS
     '''
 
-    def add_mop(self, name, frame_type=type_mop, abstractions=None, slots=None):
-        """
-        Note that nodes point to their parents
-
-        :param name:
-        :type name: string
-        :type frame_type: string
-        :type slots: dict
-        :type abstractions: list
-        """
-        self.abstraction_hierarchy.add_node(name, frame_type=frame_type)
+    def add_mop(self, mop, name: str = None, frame_type: str = type_mop, abstractions: List = None):
+        if mop not in self.abstraction_hierarchy:
+            self.abstraction_hierarchy.add_node(mop, name=name, frame_type=frame_type)
 
         if abstractions is not None:
-            if name in abstractions:
-                abstractions.remove(name)
-            self.update_abstractions(name, abstractions)
-            [self.abstraction_hierarchy.add_edge(name, abstraction) for abstraction in abstractions]
+            if mop in abstractions:
+                abstractions.remove(mop)
+            self.update_abstractions(mop, abstractions)
+            [self.abstraction_hierarchy.add_edge(mop, abstraction) for abstraction in abstractions]
 
-        if slots is not None:
-            for role, filler in slots.items():
-                self.slot_graph.add_edge(name, role, filler=filler)
-
-    def add_instance(self, name, abstractions=None, slots=None, _id=None):
-        return self.add_mop(name, frame_type=self.type_instance, abstractions=abstractions, slots=slots)
+    def add_instance(self, name, abstractions=None):
+        return self.add_mop(name, frame_type=self.type_instance, abstractions=abstractions)
 
     '''
     CHECKERS
@@ -79,7 +70,8 @@ class MOPsManager:
                 return abstraction
 
     def inherit_filler(self, name, role):
-        return self.inherit(name, lambda abstraction: self.slot_graph.get_edge_data(abstraction, role)['filler'])
+        return self.inherit(name,
+                            lambda abstraction: self.abstraction_hierarchy.get_edge_data(abstraction, role)['filler'])
 
     def get_all_abstractions(self, name):
         if name is not None:
@@ -152,7 +144,6 @@ class MOPsManager:
 
     def clear_frames(self):
         self.abstraction_hierarchy.clear()
-        self.slot_graph.clear()
 
     def is_strict_abstraction(self, specialization, abstraction):
         return abstraction is not specialization and self.is_abstraction(abstraction, specialization)
@@ -195,18 +186,50 @@ class MOPsManager:
     #         return self.mops.get(x)
     #     if create:
     #         return MOP(name=x)
-    def add_slot(self, mop: str, role: str, fillers: str or List[str]) -> None:
+    def add_slot(self, mop, role, role_name, fillers: str or List[str]) -> None:
+
+        if not isinstance(fillers, list):
+            fillers = [fillers]
         for filler in fillers:
-            self.abstraction_hierarchy.add_edge(mop, role, filler=filler)
+            self.abstraction_hierarchy.add_edge(mop, filler, filler=role, name=role_name)
 
     def get_filler(self, mop, role) -> str:
-        return self.slot_graph.get_edge_data(mop, role, 'filler')[0]
+        return self.abstraction_hierarchy.get_edge_data(mop, role, 'filler')[0]
+
+    def draw_mops(self):
+
+        edges = self.abstraction_hierarchy.edges(keys=True, data=True)
+        edges = ((u, v, k) for (u, v, k, filler) in edges if not filler)
+        g = self.abstraction_hierarchy.edge_subgraph(edges)
+        out_loc = "images/abstraction_hierarchy.png"
+        # plt.figure(None, figsize=(math.sqrt(g.number_of_nodes()), math.sqrt(g.number_of_nodes())))
+        # labels = dict((n, d['name']) if 'name' in d.keys() else (n, n) for n, d in g.nodes(data=True))
+        # nx.draw(g, labels=labels, with_labels=True)
+        # plt.savefig(out_loc)
+        self.draw_graph(g, out_loc)
+
+        edges = self.abstraction_hierarchy.edges(keys=True, data=True)
+        edges = ((u, v, k) for (u, v, k, filler) in edges if filler)
+        g = self.abstraction_hierarchy.edge_subgraph(edges)
+        out_loc = "images/slot_graph.png"
+        self.draw_graph(g, out_loc)
+
+    @staticmethod
+    def draw_graph(g, out_loc):
+
+        plt.figure(None, figsize=(math.sqrt(g.number_of_nodes() * g.number_of_edges()), math.sqrt(g.number_of_nodes() * g.number_of_edges())))
+        pos = nx.spring_layout(g, iterations=1000)
+        labels = dict((n, d['name']) if 'name' in d.keys() else (n, n) for n, d in g.nodes(data=True))
+        edge_labels = dict([((u, v), d['name']) for u, v, d in g.edges(data=True) if 'name' in d.keys()])
+
+        nx.draw(g, pos, labels=labels, with_labels=True)
+        nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels)
+        plt.savefig(out_loc)
 
 
 class AbstractionException(Exception):
     def __init__(self, specialization, abstraction):
         self.message = '%s can\'t be an abstraction of %s' % (specialization, abstraction)
-
 
 # class Slot:
 #     role = ""
