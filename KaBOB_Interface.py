@@ -1,4 +1,5 @@
 import logging
+import pickle
 import warnings
 from typing import List, Callable
 import networkx as nx
@@ -26,17 +27,40 @@ class KaBOBInterface:
 
     KaBOB_IDs = "kabob_ids"
 
-    def __init__(self, conn: RepositoryConnection, max_depth=None):
+    def __init__(self, conn: RepositoryConnection, max_depth=100):
         self.max_depth = max_depth
         self.mops = MOPs()
         self.kabob = conn
         [conn.setNamespace(name, value) for name, value in KaBOB_Constants.NAMESPACE_ASSOCIATIONS.items()]
-        self.role_fillers = {}
+        self.bio_world = None
 
-    def draw(self, layout: Callable=nx.spring_layout):
-        self.mops.draw_mops(layout=layout)
+    def draw(self, layout: Callable = nx.spring_layout, size: float = None):
+        self.mops.draw_mops(layout=layout, size=size)
 
-    def mopify(self, mop: str or URI, depth: int=0) -> URI or Literal:
+    def get_bio_world(self, pickle_dir):
+        try:
+            self.bio_world = pickle.load(open("%s/bio_world.pickle" % pickle_dir, "rb"))
+        except FileNotFoundError:
+            self.log.warning("Collecting all bio world nodes")
+            self.bio_world = self.agraph_get_objects(None, KaBOB_Constants.DENOTES)
+            pickle.dump(self.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
+
+        return self.bio_world
+
+    def mopify_bio_world(self, pickle_dir, num_nodes: int = None):
+        count = 0
+
+        if self.bio_world is None:
+            self.get_bio_world(pickle_dir)
+
+        for node in self.bio_world:
+            if num_nodes == count:
+                break
+            if self.is_bio(node):
+                self.mopify(node)
+                count += 1
+
+    def mopify(self, mop: str or URI, depth: int = 0) -> URI or Literal:
         node: URI or Literal = mop \
             if isinstance(mop, URI) or isinstance(mop, Literal) \
             else self.create_uri(mop)
@@ -53,53 +77,49 @@ class KaBOBInterface:
         else:
             return self.create_kabob_mop(node, depth)
 
-    def create_kabob_mop(self, node: URI or Literal, depth: int, is_trivial: bool=False) -> URI or Literal:
-        mop_name: str = self.instance_name(node) if self.is_bio_instance(node) else self.node_print_name(node)
-        self.log.debug("\t" * depth + "> " + mop_name)
-        if not is_trivial and (self.max_depth is None or depth < self.max_depth):
-            superclasses = self.get_superclasses(node)
-            parents = []
-            if superclasses:
-                for superclass in superclasses:
-                    if not self.is_restriction(superclass):
-                        parents.append(superclass)
+    def create_kabob_mop(self, node: URI or Literal, depth: int, is_trivial: bool = False) -> URI or Literal:
 
+        parents: List[Value] = list()
+        slots: List[URI or Literal, str, URI or Literal] = list()
+        labels: List[str] = list()
+        equivalent_classes: List[Value] = list()
+
+        node_statements = self.agraph_get_statements(node)
+        for statement in node_statements:
+            o = statement.getObject()
+            p = statement.getPredicate()
+
+            if p.getURI() == KaBOB_Constants.SUBCLASSOF:
+                if self.is_restriction(o):
+                    role = self.get_restriction_property(o)
+                    slots.append(
+                        (role, self.get_role_name(role), self.mopify(self.get_restriction_value(o), depth + 1)))
+                else:
+                    parents.append(o)
+            elif p.getURI() == KaBOB_Constants.LABEL and isinstance(o, Literal):
+                labels.append(str(o.getLabel()))
+            elif p.getURI() == KaBOB_Constants.EQUIVALENT_CLASS:
+                equivalent_classes.append(o)
+            elif p.getURI() not in KaBOB_Constants.NOT_A_SLOT:
+                slots.append((p, self.get_role_name(p), o))
+
+        mop_name: str = self.instance_name(node, labels) if self.is_bio_instance(node) else self.node_print_name(
+            node, labels)
+
+        self.log.debug("\t" * depth + "> " + mop_name)
+
+        if not is_trivial and depth < self.max_depth:
             if parents and self.is_bio_instance(node):
                 warnings.warn(str(mop_name) + " is an instance and a subClass")
-
-            self.mops.add_frame(node, label=mop_name,
-                                abstractions=[self.mopify(parent, depth + 1) for parent in parents])
-            self.create_slots(node, depth + 1)
-            # self.infer_inverse_relations(name, depth)
-
+            [self.mopify(parent, depth + 1) for parent in parents]
+            [self.mopify(filler, depth + 1) for role, role_name, filler in slots]
+            self.mops.add_frame(node, label=mop_name, abstractions=parents, slots=slots)
         else:
             self.mops.add_frame(node, label=mop_name)
+
         self.log.debug("\t" * depth + "< " + mop_name)
 
         return node
-
-    def create_slots(self, main_node: Value, depth: int) -> None:
-        equivalent_nodes = [main_node]  # + self.get_equivalent_classes(main_node)
-        # self.mopsManager.add_slot(main_node, self.KaBOB_IDs, self.KaBOB_IDs, equivalent_nodes)
-
-        for node in equivalent_nodes:
-            superclasses = self.get_superclasses(node)
-            if superclasses:
-                for superclass in superclasses:
-                    if self.is_restriction(superclass):
-                        restriction = superclass
-                        role = self.get_restriction_property(restriction)
-                        self.mops.add_slot(main_node,
-                                           role,
-                                           self.get_role_name(role),
-                                           self.mopify(self.get_restriction_value(restriction), depth))
-            for edge in self.get_outgoing_edges(node):
-                if edge.getURI() not in KaBOB_Constants.NOT_A_SLOT:
-                    self.mops.add_slot(main_node,
-                                       edge,
-                                       self.get_role_name(edge),
-                                       [self.mopify(filler, depth)
-                                               for filler in self.agraph_get_objects(node, edge)])
 
     def is_bio_instance(self, node: URI) -> bool:
         return self.is_bio(node) and self.get_node_type(node)
@@ -114,19 +134,16 @@ class KaBOBInterface:
         return isinstance(node, URI) and \
                node.getNamespace() == KaBOB_Constants.get_namespace(KaBOB_Constants.ICE_NAMESPACE)
 
-    def instance_name(self, node: URI or Literal) -> str:
-        return "%s - " % self.node_print_name(self.get_node_type(node))
+    def instance_name(self, node: URI or Literal, labels: List) -> str:
+        return "%s - " % self.node_print_name(self.get_node_type(node), labels)
 
-    def node_print_name(self, node: URI or Literal or str) -> str:
-        labels = [o.getLabel() for o in self.agraph_get_objects(s=node, p=KaBOB_Constants.LABEL) if
-                  isinstance(o, Literal)]
-        _id = self.agraph_get_object(s=node, p=KaBOB_Constants.ID)
-
+    @staticmethod
+    def node_print_name(node: URI or Literal or str, labels: List) -> str:
         local_name = node
         if isinstance(node, URI):
             local_name = node.getLocalName()
         elif isinstance(node, Literal):
-            node.getLabel()
+            local_name = node.getLabel()
 
         def find_lowercase_label(_labels):
             for label in _labels:
@@ -135,10 +152,7 @@ class KaBOBInterface:
             return False
 
         if labels:
-            return str(find_lowercase_label(labels) or labels[0])
-        if _id:
-            return str(_id.getLabel())
-            # return _id or part_to_string(node, format="concise")
+            return find_lowercase_label(labels) or labels[0]
         else:
             return str(local_name)
 
@@ -173,12 +187,9 @@ class KaBOBInterface:
         subjects = self.agraph_get_subjects(o, p)
         return subjects[0] if subjects else None
 
-    def get_superclasses(self, node):
-        return self.agraph_get_objects(s=node, p=KaBOB_Constants.SUBCLASSOF)
-
     def is_restriction(self, node):
         _type = self.get_node_type(node)
-        return _type and _type.getURI() == KaBOB_Constants.get_full_uri(KaBOB_Constants.RESTRICTION)
+        return _type and _type.getURI() == KaBOB_Constants.RESTRICTION
 
     def get_node_type(self, node: Value) -> URI or Literal:
         return self.agraph_get_object(s=node, p=KaBOB_Constants.TYPE)
@@ -219,30 +230,6 @@ class KaBOBInterface:
     def statement_to_slot(self, statement):
         pass
 
-    # def infer_inverse_relations(self, mop, depth):
-    #     """
-    #
-    #     :type depth: int
-    #     :type mop: str
-    #     """
-    #     for slot in self:
-    #         inverse_relation = self.get_inverse_relation(slot.role)
-    #         if inverse_relation and self.mopsManager.is_mop(slot.filler):
-    #             print("\t" * depth + "Adding inverse: %s %s %s" % (slot.filler, inverse_relation, mop))
-    #             mop.add_slot(slot.filler, inverse_relation)
-
-    # def get_inverse_relation(self, role: URI):
-    #     if not role == self.KaBOB_IDs:
-    #         edge = self.get_resource()
-    #         inverse = edge and (self.agraph_get_object(s=edge, p=KaBOB_Constants.INVERSE_OF) or
-    #                             self.agraph_get_subject(o=edge, p=KaBOB_Constants.INVERSE_OF))
-    #         if inverse:
-    #             return self.get_role_name(inverse)
-    #         else:
-    #             return None
-    #     else:
-    #         return None
-
     def rdf_list_p(self, node):
         """
 
@@ -264,12 +251,11 @@ class KaBOBInterface:
     def mop_to_nodes(self, mop):
         return self.mops.get_filler(mop, self.KaBOB_IDs)
 
-    # def lookup_mop(self, key):
-    #     return self.find_mop(key) or (
-    #             (self.is_upi(key) or self.get_upi(key, is_error=False)) and self.mopsManager.mops.get(key))
-
     def get_role_name(self, node: URI or Literal) -> str:
-        return self.node_print_name(node)
+        return self.node_print_name(node, self.get_labels(node))
+
+    def get_labels(self, node: URI or Literal):
+        return [str(o.getLabel()) for o in self.agraph_get_objects(node, KaBOB_Constants.LABEL)]
 
     @staticmethod
     def is_mopifyable(node: URI) -> bool:
@@ -287,17 +273,9 @@ class KaBOBInterface:
         return self.agraph_get_objects(s=node, p=KaBOB_Constants.EQUIVALENT_CLASS)
 
     def get_outgoing_edges(self, node: Value) -> List[URI]:
-        """
-
-        :type node: URI
-        """
         return [statement.getPredicate() for statement in self.agraph_get_statements(s=node, p=None)]
 
     def get_incoming_edges(self, node):
-        """
-
-        :type node: URI
-        """
         return self.agraph_get_subjects(o=node, p=None, full_statement=True)
 
     def get_restriction_property(self, restriction: URI or Literal) -> URI or Literal:
@@ -305,15 +283,6 @@ class KaBOBInterface:
 
     def get_restriction_value(self, restriction: Value):
         return self.agraph_get_object(s=restriction, p=KaBOB_Constants.RESTRICTION_VALUE)
-
-    def is_upi(self, key):
-        pass
-
-    def get_upi(self, key, is_error):
-        pass
-
-    def is_upi_type(self, node: URI, _type: str) -> bool:
-        pass
 
 
 class OpenKaBOB:

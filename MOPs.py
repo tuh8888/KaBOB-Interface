@@ -2,12 +2,13 @@ import math
 
 import networkx as nx
 import matplotlib.pyplot as plt
-from typing import List, Callable
+from typing import List, Callable, Tuple, Any
 
 
 class MOPs(nx.MultiDiGraph):
     type_mop = "mop"
     type_instance = "instance"
+    abstraction = 'abstraction'
 
     def __init__(self, **attr):
         super().__init__(**attr)
@@ -16,15 +17,17 @@ class MOPs(nx.MultiDiGraph):
     ADDERS
     '''
 
-    def add_frame(self, frame, label: str = None, frame_type: str = type_mop, abstractions: List = None):
+    def add_frame(self, frame, label: str = None, frame_type: str = type_mop, abstractions: List = None, slots: List[Tuple[Any, str, Any]]=None):
         if frame not in self:
             self.add_node(frame, label=label, frame_type=frame_type)
 
-        if abstractions is not None:
+        if abstractions:
             if frame in abstractions:
                 abstractions.remove(frame)
             self.update_abstractions(frame, abstractions)
-            [self.add_edge(frame, abstraction) for abstraction in abstractions]
+            [self.add_edge(frame, abstraction, key=self.abstraction) for abstraction in abstractions]
+        if slots:
+            [self.add_slot(frame, role, role_label, filler) for role, role_label, filler in slots]
 
     def add_instance(self, label, abstractions=None):
         return self.add_frame(label, frame_type=self.type_instance, abstractions=abstractions)
@@ -86,7 +89,7 @@ class MOPs(nx.MultiDiGraph):
         if frame is not None:
             immediate_parents = []
             if frame in self:
-                immediate_parents = self.neighbors(frame)
+                immediate_parents = self.get_abstractions(frame)
 
             all_abstractions = list(immediate_parents)
             for parent in list(immediate_parents):
@@ -98,7 +101,7 @@ class MOPs(nx.MultiDiGraph):
         self.remove_edge(specialization, abstraction)
 
     def unlink_old_abstractions(self, frame, old_abstractions, new_abstractions):
-        for old_abstraction in list(old_abstractions):
+        for old_abstraction in old_abstractions:
             if old_abstraction not in new_abstractions:
                 self.unlink_abstraction(frame, old_abstraction)
 
@@ -112,7 +115,7 @@ class MOPs(nx.MultiDiGraph):
             print(err)
             return
 
-        self.add_edge(specialization, abstraction)
+        self.add_edge(specialization, abstraction, key=self.abstraction)
 
     def link_new_abstractions(self, frame, old_abstractions, new_abstractions):
         for new_abstraction in new_abstractions:
@@ -123,16 +126,27 @@ class MOPs(nx.MultiDiGraph):
                     self.link_abstraction(frame, new_abstraction)
 
     def update_abstractions(self, frame, abstractions):
-        old_abstractions = self.neighbors(frame)
+        old_abstractions = self.get_abstractions(frame)
         new_abstractions = set(abstractions)
 
         if old_abstractions != new_abstractions:
             self.unlink_old_abstractions(frame, old_abstractions, new_abstractions)
             self.link_new_abstractions(frame, old_abstractions, new_abstractions)
 
+    def get_abstractions(self, frame):
+        return [neighbor for neighbor in self.neighbors(frame) if self.has_edge(frame, neighbor, key=self.abstraction)]
+
     '''
     GETTERS
     '''
+
+    def get_abstraction_hierarchy(self):
+        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k is self.abstraction)
+        return self.edge_subgraph(edges)
+
+    def get_slot_graph(self):
+        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k is not self.abstraction)
+        return self.edge_subgraph(edges)
 
     def get_instances(self, abstraction, slots):
         if self.is_instance(abstraction) and self.has_slots(abstraction, slots):
@@ -161,23 +175,16 @@ class MOPs(nx.MultiDiGraph):
     DRAWING
     '''
 
-    def draw_mops(self, layout: Callable=nx.spring_layout):
-        self.draw_graph("images/full_graph.png", layout=layout)
+    def draw_mops(self, layout: Callable = nx.spring_layout, size: float = None):
+        self.draw_graph(self, "images/full_graph.png", layout=layout, size=size)
+        self.draw_graph(self.get_abstraction_hierarchy(), "images/abstraction_hierarchy.png", layout=layout, size=size)
+        self.draw_graph(self.get_slot_graph(), "images/slot_graph.png", layout=layout, size=size)
 
-        edges = ((u, v, k) for (u, v, k, filler) in self.edges(keys=True, data=True) if not filler)
-        self.draw_graph("images/abstraction_hierarchy.png", edges=edges, layout=layout)
+    @staticmethod
+    def draw_graph(g, out_loc: str, layout: Callable = nx.spring_layout, size: float = None):
 
-        edges = ((u, v, k) for (u, v, k, filler) in self.edges(keys=True, data=True) if filler)
-        self.draw_graph("images/slot_graph.png", edges=edges, layout=layout)
-
-    def draw_graph(self, out_loc: str, edges=None, layout: Callable=nx.spring_layout):
-
-        if edges:
-            g = self.edge_subgraph(edges)
-        else:
-            g = self
-
-        size = math.sqrt(g.number_of_nodes() * g.number_of_edges()) / 2
+        if size is None:
+            size = math.sqrt(g.number_of_nodes() * g.number_of_edges()) / 2
         plt.figure(None, figsize=(size, size))
 
         labels = dict((n, d['label']) if 'label' in d.keys() else (n, n) for n, d in g.nodes(data=True))
