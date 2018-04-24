@@ -27,17 +27,10 @@ class MOPs(nx.MultiDiGraph):
             self.update_abstractions(frame, abstractions)
             [self.add_edge(frame, abstraction, key=self.abstraction) for abstraction in abstractions]
         if slots:
-            [self.add_slot(frame, role, role_label, filler) for role, role_label, filler in slots]
+            [self.add_edge(frame, filler, filler=role, label=role_label) for role, role_label, filler in slots]
 
     def add_instance(self, label, abstractions=None):
         return self.add_frame(label, frame_type=self.type_instance, abstractions=abstractions)
-
-    def add_slot(self, mop, role, role_label, fillers: str or List[str]) -> None:
-        if mop != role:
-            if not isinstance(fillers, list):
-                fillers = [fillers]
-            for filler in fillers:
-                self.add_edge(mop, filler, filler=role, label=role_label)
 
     '''
     CHECKERS
@@ -133,12 +126,12 @@ class MOPs(nx.MultiDiGraph):
             self.unlink_old_abstractions(frame, old_abstractions, new_abstractions)
             self.link_new_abstractions(frame, old_abstractions, new_abstractions)
 
-    def get_abstractions(self, frame):
-        return [neighbor for neighbor in self.neighbors(frame) if self.has_edge(frame, neighbor, key=self.abstraction)]
-
     '''
     GETTERS
     '''
+
+    def get_abstractions(self, frame):
+        return [neighbor for neighbor in self.neighbors(frame) if self.has_edge(frame, neighbor, key=self.abstraction)]
 
     def get_abstraction_hierarchy(self):
         edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k is self.abstraction)

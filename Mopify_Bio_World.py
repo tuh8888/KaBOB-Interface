@@ -22,8 +22,8 @@ def mopify_bio_world(pickle_dir, num_nodes=None):
         pickle.dump(interface.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
 
     log.warning("Caching results")
-    pickle.dump(interface, open("%s/interface.pickle" % pickle_dir, "wb"))
-    shutil.copyfile("%s/interface.pickle" % pickle_dir, "%s/interface_%d.pickle" % (pickle_dir, num_nodes))
+    # pickle.dump(interface, open("%s/interface.pickle" % pickle_dir, "wb"))
+    # shutil.copyfile("%s/interface.pickle" % pickle_dir, "%s/interface_%d.pickle" % (pickle_dir, num_nodes))
 
     log.warning("Drawing images")
     interface.draw(layout=nx.fruchterman_reingold_layout, size=100)
