@@ -1,7 +1,7 @@
 import logging
 import pickle
 import warnings
-from typing import List, Callable, Dict, Set
+from typing import List, Callable, Dict, Set, Tuple
 import networkx as nx
 
 from franz.openrdf.connect import ag_connect
@@ -87,7 +87,7 @@ class KaBOBInterface:
     MOPIFICATION
     """
 
-    def mopify(self, mop: str or URI, depth: int = 0) -> URI or Literal or List[URI or Literal]:
+    def mopify(self, mop: str or URI, depth: int = 0, statements=None) -> URI or Literal or List[URI or Literal]:
         node: URI or Literal = mop \
             if isinstance(mop, URI) or isinstance(mop, Literal) \
             else self.create_uri(mop)
@@ -98,17 +98,19 @@ class KaBOBInterface:
             return node
         elif not self.is_bio(node):
             self.log.warning("\t" * depth + "Trivial mopification of non-BIO-world node %s" % node)
-            return self.create_kabob_mop(node, depth, is_trivial=True)
+            return self.create_kabob_mop(node, statements, depth, is_trivial=True)
         else:
-            return self.create_kabob_mop(node, depth)
+            return self.create_kabob_mop(node, statements, depth)
 
-    def create_kabob_mop(self, node: URI or Literal, depth: int, is_trivial: bool = False) -> URI or Literal:
+    def create_kabob_mop(self, node: URI or Literal, node_statements: List, depth: int,
+                         is_trivial: bool = False) -> URI or Literal:
 
-        parents: List[Value] = list()
+        parents: List[Tuple[Value, List]] = list()
         slots: List[URI or Literal, str, URI or Literal] = list()
         labels: List[str] = list()
 
-        node_statements = self.get_statements(node)
+        if not node_statements:
+            node_statements = self.get_statements(node)
 
         equivalent_class = None
         node_type = None
@@ -117,13 +119,26 @@ class KaBOBInterface:
             p = statement.getPredicate()
 
             if p.getURI() == KaBOB_Constants.SUBCLASSOF:
-                if self.is_restriction(o):
-                    role = self.get_restriction_property(o)
-                    role_label = self.get_role_name(role)
-                    slots.append(
-                        (role, role_label, self.mopify(self.get_restriction_value(o), depth + 1)))
+                parent_statements = self.get_statements(o)
+                is_restriction = False
+                restriction_property = None
+                restriction_value = None
+                for parent_statement in parent_statements:
+                    parent_o = parent_statement.getObject()
+                    parent_p = parent_statement.getPredicate()
+                    if parent_p.getURI() == KaBOB_Constants.TYPE:
+                        if parent_o.getURI() == KaBOB_Constants.RESTRICTION:
+                            is_restriction = True
+                    elif parent_p.getURI() == KaBOB_Constants.RESTRICTION_PROPERTY:
+                        restriction_property = parent_o
+                    elif parent_p.getURI() == KaBOB_Constants.RESTRICTION_VALUE:
+                        restriction_value = parent_o
+                if is_restriction:
+                    role = restriction_property
+                    role_label = self.get_role_name(restriction_property)
+                    slots.append((role, role_label, self.mopify(restriction_value, depth + 1)))
                 else:
-                    parents.append(o)
+                    parents.append((o, parent_statements))
 
             elif p.getURI() == KaBOB_Constants.LABEL and isinstance(o, Literal):
                 labels.append(str(o.getLabel()))
@@ -175,7 +190,8 @@ class KaBOBInterface:
             else:
                 self.mops.add_equivalent_frame(node, equivalent_class)
 
-            [self.mops.add_abstraction(equivalent_class, self.mopify(parent, depth + 1)) for parent in parents]
+            [self.mops.add_abstraction(equivalent_class, self.mopify(parent, depth + 1, statements=parent_statements))
+             for parent, parent_statements in parents]
             [self.mops.add_slot(equivalent_class, role, role_name, self.mopify(filler, depth + 1)) for
              role, role_name, filler in slots]
         else:
@@ -207,9 +223,9 @@ class KaBOBInterface:
         return isinstance(node, URI) and \
                node.getNamespace() == KaBOB_Constants.get_namespace(KaBOB_Constants.ICE_NAMESPACE)
 
-    def is_restriction(self, node):
-        _type = self.get_node_type(node)
-        return _type and _type.getURI() == KaBOB_Constants.RESTRICTION
+    # def is_restriction(self, node):
+    #     _type = self.get_node_type(node)
+    #     return _type and _type.getURI() == KaBOB_Constants.RESTRICTION
 
     # def is_rdf_list(self, node: URI or Literal) -> bool:
     #     _type = self.get_node_type(node)

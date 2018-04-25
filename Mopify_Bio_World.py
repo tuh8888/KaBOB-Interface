@@ -23,11 +23,13 @@ def mopify_bio_world(image_dir, pickle_dir, num_nodes=None):
         # pickle.dump(interface.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
         count = 0
         for node in bio_world:
-            interface.mopify(node)
+            log.debug("**************************** %d ****************************" % count)
+            if node not in interface.mops:
+                interface.mopify(node)
 
-            log.debug("Caching results")
-            pickle.dump(interface.mops, open("%s/mops.pickle" % pickle_dir, "wb"))
-            shutil.copyfile("%s/mops.pickle" % pickle_dir, "%s/mops_%d.pickle" % (pickle_dir, count))
+                log.debug("Caching results")
+                pickle.dump(interface.mops, open("%s/mops.pickle" % pickle_dir, "wb"))
+                shutil.copyfile("%s/mops.pickle" % pickle_dir, "%s/mops_%d.pickle" % (pickle_dir, count))
 
             count += 1
             if count == num_nodes:
@@ -46,7 +48,7 @@ if __name__ == "__main__":
         if len(sys.argv) == 2:
             val = int(sys.argv[1])
         else:
-            val = 100
+            val = 5000
         pickle_folder = "E:/Documents/KaBOB/pickles"
         image_folder = "E:/Documents/KaBOB/images"
 
