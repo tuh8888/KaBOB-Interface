@@ -1,14 +1,21 @@
+import logging
 import math
+from typing import Callable
 
-import networkx as nx
 import matplotlib.pyplot as plt
-from typing import List, Callable, Tuple, Any
+import networkx as nx
+
+
+class FrameNotAddedYetException(Exception):
+    pass
 
 
 class MOPs(nx.MultiDiGraph):
+    log = logging.getLogger("MOPs")
     type_mop = "mop"
     type_instance = "instance"
     abstraction = 'abstraction'
+    equivalent = 'equivalent'
 
     def __init__(self, **attr):
         super().__init__(**attr)
@@ -17,24 +24,55 @@ class MOPs(nx.MultiDiGraph):
     ADDERS
     '''
 
-    def add_frame(self, frame, label: str = None, frame_type: str = type_mop, abstractions: List = None, slots: List[Tuple[Any, str, Any]]=None):
+    def add_frame(self, frame, label: str = None, frame_type: str = type_mop):
         if frame not in self:
             self.add_node(frame, label=label, frame_type=frame_type)
 
-        if abstractions:
-            if frame in abstractions:
-                abstractions.remove(frame)
-            self.update_abstractions(frame, abstractions)
-            [self.add_edge(frame, abstraction, key=self.abstraction) for abstraction in abstractions]
-        if slots:
-            [self.add_edge(frame, filler, filler=role, label=role_label) for role, role_label, filler in slots]
+    def add_slot(self, frame, role, role_label, filler):
+        if isinstance(filler, list):
+            list_node = str(frame) + " " + str(role) + " - list"
+            self.add_node(list_node, label=list_node, list=filler)
+            filler = list_node
+        self.add_edge(frame, filler, key=role, label=role_label)
 
-    def add_instance(self, label, abstractions=None):
-        return self.add_frame(label, frame_type=self.type_instance, abstractions=abstractions)
+    def add_equivalent_frame(self, frame, equivalent_frame):
+        self.add_edge(frame, equivalent_frame, key=self.equivalent, label=self.equivalent)
 
+    def add_instance(self, label):
+        return self.add_frame(label, frame_type=self.type_instance)
+
+    def add_abstraction(self, frame, abstraction):
+        if frame in self.get_abstraction_hierarchy():
+            if not self.is_abstraction(abstraction, frame):
+                try:
+                    if self.is_abstraction(frame, abstraction):
+                        raise AbstractionException(nx.get_node_attributes(self, "label")[frame], nx.get_node_attributes(self, "label")[abstraction])
+                    else:
+                        self.add_edge(frame, abstraction, key=self.abstraction)
+                except AbstractionException as ae:
+                    self.log.warning(ae.message)
+
+        else:
+            self.add_edge(frame, abstraction, key=self.abstraction)
     '''
     CHECKERS
     '''
+
+    def is_abstraction(self, abstraction, specialization):
+        if abstraction == specialization:
+            return True
+
+        abstraction_hierarchy = self.get_abstraction_hierarchy()
+        if abstraction in abstraction_hierarchy and specialization in abstraction_hierarchy:
+            return nx.has_path(self.get_abstraction_hierarchy(), specialization, abstraction)
+        else:
+            return False
+        # specialization_abstractions = self.get_all_abstractions(specialization)
+        # if specialization_abstractions:
+        #     for spec_abstraction in specialization_abstractions:
+        #         if abstraction is spec_abstraction:
+        #             return True
+        # return False
 
     def is_mop(self, frame):
         return nx.get_node_attributes(self, 'frame_type')[frame] == self.type_mop
@@ -50,17 +88,6 @@ class MOPs(nx.MultiDiGraph):
             if not self.has_slot(instance, role, filler):
                 return False
         return True
-
-    def is_abstraction(self, abstraction, specialization):
-        if abstraction is specialization:
-            return True
-        specialization_abstractions = self.get_all_abstractions(specialization)
-        if specialization_abstractions is not None:
-            for spec_abstraction in specialization_abstractions:
-                if abstraction is spec_abstraction:
-                    return True
-
-        return False
 
     def is_strict_abstraction(self, specialization, abstraction):
         return abstraction is not specialization and self.is_abstraction(abstraction, specialization)
@@ -78,67 +105,28 @@ class MOPs(nx.MultiDiGraph):
         return self.inherit(frame,
                             lambda abstraction: self.get_edge_data(abstraction, role)['filler'])
 
-    def get_all_abstractions(self, frame):
-        if frame is not None:
-            immediate_parents = []
-            if frame in self:
-                immediate_parents = self.get_abstractions(frame)
-
-            all_abstractions = list(immediate_parents)
-            for parent in list(immediate_parents):
-                all_abstractions.extend(self.get_all_abstractions(parent))
-
-            return all_abstractions
-
-    def unlink_abstraction(self, specialization, abstraction):
-        self.remove_edge(specialization, abstraction)
-
-    def unlink_old_abstractions(self, frame, old_abstractions, new_abstractions):
-        for old_abstraction in old_abstractions:
-            if old_abstraction not in new_abstractions:
-                self.unlink_abstraction(frame, old_abstraction)
-
-    def link_abstraction(self, specialization, abstraction):
-        if self.is_abstraction(abstraction, specialization):
-            return
-        try:
-            if self.is_abstraction(specialization, abstraction):
-                raise AbstractionException(specialization, abstraction)
-        except AbstractionException as err:
-            print(err)
-            return
-
-        self.add_edge(specialization, abstraction, key=self.abstraction)
-
-    def link_new_abstractions(self, frame, old_abstractions, new_abstractions):
-        for new_abstraction in new_abstractions:
-            if new_abstraction not in old_abstractions:
-                if frame == new_abstraction:
-                    raise AbstractionException(frame, new_abstraction)
-                else:
-                    self.link_abstraction(frame, new_abstraction)
-
-    def update_abstractions(self, frame, abstractions):
-        old_abstractions = self.get_abstractions(frame)
-        new_abstractions = set(abstractions)
-
-        if old_abstractions != new_abstractions:
-            self.unlink_old_abstractions(frame, old_abstractions, new_abstractions)
-            self.link_new_abstractions(frame, old_abstractions, new_abstractions)
-
     '''
     GETTERS
     '''
+
+    def get_all_abstractions(self, frame):
+        immediate_parents = self.get_abstractions(frame)
+
+        all_abstractions = list(immediate_parents)
+        for parent in list(immediate_parents):
+            all_abstractions.extend(self.get_all_abstractions(parent))
+
+        return all_abstractions
 
     def get_abstractions(self, frame):
         return [neighbor for neighbor in self.neighbors(frame) if self.has_edge(frame, neighbor, key=self.abstraction)]
 
     def get_abstraction_hierarchy(self):
-        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k is self.abstraction)
+        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k == self.abstraction)
         return self.edge_subgraph(edges)
 
     def get_slot_graph(self):
-        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k is not self.abstraction)
+        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k != self.abstraction and k != self.equivalent)
         return self.edge_subgraph(edges)
 
     def get_instances(self, abstraction, slots):
@@ -154,6 +142,9 @@ class MOPs(nx.MultiDiGraph):
          if self.successors(frame) is None]
         return roots
 
+    def get_filler(self, mop, role) -> str:
+        return self.get_edge_data(mop, role, 'filler')[0]
+
     '''
     REMOVERS
     '''
@@ -161,34 +152,31 @@ class MOPs(nx.MultiDiGraph):
     def clear_frames(self):
         self.clear()
 
-    def get_filler(self, mop, role) -> str:
-        return self.get_edge_data(mop, role, 'filler')[0]
-
     '''
     DRAWING
     '''
 
-    def draw_mops(self, layout: Callable = nx.spring_layout, size: float = None):
-        self.draw_graph(self, "images/full_graph.png", layout=layout, size=size)
-        self.draw_graph(self.get_abstraction_hierarchy(), "images/abstraction_hierarchy.png", layout=layout, size=size)
-        self.draw_graph(self.get_slot_graph(), "images/slot_graph.png", layout=layout, size=size)
+    def draw_mops(self, image_dir: str, layout: Callable = nx.spring_layout, size: float = None):
+        pos = layout(self)
+        self.draw_graph(self, pos, "%s/full_graph.png" % image_dir, size=size)
+        self.draw_graph(self.get_abstraction_hierarchy(), pos, "%s/abstraction_hierarchy.png" % image_dir, size=size)
+        self.draw_graph(self.get_slot_graph(), pos, "%s/slot_graph.png" % image_dir, size=size)
 
     @staticmethod
-    def draw_graph(g, out_loc: str, layout: Callable = nx.spring_layout, size: float = None):
+    def draw_graph(g, pos, out_loc: str, size: float = None):
+        if g.nodes:
+            if size is None:
+                size = math.sqrt(g.number_of_nodes() * g.number_of_edges()) / 2
+            plt.figure(None, figsize=(size, size))
 
-        if size is None:
-            size = math.sqrt(g.number_of_nodes() * g.number_of_edges()) / 2
-        plt.figure(None, figsize=(size, size))
+            labels = dict((n, d['label']) if 'label' in d.keys() else (n, n) for n, d in g.nodes(data=True))
+            edge_labels = dict([((u, v), d['label']) for u, v, d in g.edges(data=True) if 'label' in d.keys()])
 
-        labels = dict((n, d['label']) if 'label' in d.keys() else (n, n) for n, d in g.nodes(data=True))
-        edge_labels = dict([((u, v), d['label']) for u, v, d in g.edges(data=True) if 'label' in d.keys()])
+            nx.draw(g, pos, labels=labels, with_labels=True)
+            nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels)
 
-        pos = layout(g)
-        nx.draw(g, pos, labels=labels, with_labels=True)
-        nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels)
-
-        plt.savefig(out_loc)
-        plt.close()
+            plt.savefig(out_loc)
+            plt.close()
 
 
 class AbstractionException(Exception):

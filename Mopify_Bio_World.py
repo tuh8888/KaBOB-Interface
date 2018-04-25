@@ -4,37 +4,50 @@ import sys
 import logging
 import networkx as nx
 
-from KaBOB_Interface import OpenKaBOB, KaBOBInterface
+from KaBOB_Interface import KaBOBInterface
 
 log = logging.getLogger('mopify_kabob_world')
 
 
-def mopify_bio_world(pickle_dir, num_nodes=None):
-    with OpenKaBOB("KaBOB_credentials.txt") as kabob:
+def mopify_bio_world(image_dir, pickle_dir, num_nodes=None):
+    with KaBOBInterface("KaBOB_credentials.txt") as interface:
 
         try:
-            interface = pickle.load(open("%s/interface.pickle" % pickle_dir, "rb"))
-            interface.kabob = kabob
+            mops = pickle.load(open("%s/mops.pickle" % pickle_dir, "rb"))
+            interface.mops = mops
         except FileNotFoundError:
-            interface = KaBOBInterface(kabob)
+            pass
 
-        interface.mopify_bio_world(pickle_dir, num_nodes=num_nodes)
-        pickle.dump(interface.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
+        bio_world = interface.get_bio_world(pickle_dir)
 
-    log.warning("Caching results")
-    # pickle.dump(interface, open("%s/interface.pickle" % pickle_dir, "wb"))
-    # shutil.copyfile("%s/interface.pickle" % pickle_dir, "%s/interface_%d.pickle" % (pickle_dir, num_nodes))
+        # pickle.dump(interface.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
+        count = 0
+        for node in bio_world:
+            interface.mopify(node)
 
-    log.warning("Drawing images")
-    interface.draw(layout=nx.fruchterman_reingold_layout, size=100)
-    # pickle.dump(interface, open("pickles/interface_%d.pickle" % num_nodes, "wb"))
+            log.debug("Caching results")
+            pickle.dump(interface.mops, open("%s/mops.pickle" % pickle_dir, "wb"))
+            shutil.copyfile("%s/mops.pickle" % pickle_dir, "%s/mops_%d.pickle" % (pickle_dir, count))
+
+            count += 1
+            if count == num_nodes:
+                break
+
+    log.debug("Drawing images")
+    interface.draw(image_dir, layout=nx.fruchterman_reingold_layout, size=100)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        val = int(sys.argv[2])
-        pickle_folder = sys.argv[1]
+    if len(sys.argv) == 4:
+        image_folder = sys.argv[1]
+        pickle_folder = sys.argv[2]
+        val = int(sys.argv[3])
     else:
-        val = 200
-        pickle_folder = "E:/Documents/pickles"
-    mopify_bio_world(pickle_folder, num_nodes=val)
+        if len(sys.argv) == 2:
+            val = int(sys.argv[1])
+        else:
+            val = 100
+        pickle_folder = "E:/Documents/KaBOB/pickles"
+        image_folder = "E:/Documents/KaBOB/images"
+
+    mopify_bio_world(image_folder, pickle_folder, num_nodes=val)

@@ -8,8 +8,14 @@ def get_namespace(namespace):
 
 
 def get_full_uri(concise_name):
-    namespace, local_name = concise_name.split(':')
-    return get_namespace(namespace) + local_name
+    namespace, local_name = split_name(concise_name)
+    return namespace + local_name
+
+
+def split_name(name):
+    namespace, local_name = name.split(":")
+    namespace = get_namespace(namespace)
+    return (namespace, local_name) if namespace else (name, None)
 
 
 """"
@@ -27,7 +33,8 @@ NAMESPACE_ASSOCIATIONS = {'rdfs': "http://www.w3.org/2000/01/rdf-schema#",
                           'ccp.ext': "http://ccp.ucdenver.edu/obo/ext/",
                           'ccp.bnode': "http://ccp.ucdenver.edu/bnode/",
                           'ice': "http://ccp.ucdenver.edu/kabob/ice/",
-                          'bio': "http://ccp.ucdenver.edu/kabob/bio/"}
+                          'bio': "http://ccp.ucdenver.edu/kabob/bio/",
+                          'ncbitaxon': "http://purl.obolibrary.org/obo/ncbitaxon#"}
 
 """
 RELATIONS
@@ -60,8 +67,14 @@ REST = get_full_uri('rdf:rest')
 INTERSECTIONOF = get_full_uri('owl:intersectionOf')
 DISJOINTWITH = get_full_uri('owl:disjointWith')
 LIST = get_full_uri('rdf:List')
+HAS_RANK = get_full_uri('ncbitaxon:has_rank')
 
 # Ignore these relations when making slots
+
+CUSTOM_RELATIONS_TO_IGNORE = [DISJOINTWITH,
+                              HAS_RANK,
+                              INTERSECTIONOF,
+                              get_full_uri('rdf:subClassOf')]
 
 NOT_A_SLOT = [TYPE,
               SUBCLASSOF,
@@ -73,4 +86,6 @@ NOT_A_SLOT = [TYPE,
               COMMENT,
               OBONAMESPACE,
               EQUIVALENTCLASS,
-              DENOTES]
+              DENOTES] + CUSTOM_RELATIONS_TO_IGNORE
+
+
