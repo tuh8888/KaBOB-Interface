@@ -46,7 +46,8 @@ class MOPs(nx.MultiDiGraph):
             if not self.is_abstraction(abstraction, frame):
                 try:
                     if self.is_abstraction(frame, abstraction):
-                        raise AbstractionException(nx.get_node_attributes(self, "label")[frame], nx.get_node_attributes(self, "label")[abstraction])
+                        raise AbstractionException(nx.get_node_attributes(self, "label")[frame],
+                                                   nx.get_node_attributes(self, "label")[abstraction])
                     else:
                         self.add_edge(frame, abstraction, key=self.abstraction)
                 except AbstractionException as ae:
@@ -54,6 +55,7 @@ class MOPs(nx.MultiDiGraph):
 
         else:
             self.add_edge(frame, abstraction, key=self.abstraction)
+
     '''
     CHECKERS
     '''
@@ -177,6 +179,39 @@ class MOPs(nx.MultiDiGraph):
 
             plt.savefig(out_loc)
             plt.close()
+
+    """
+    Statistics
+    """
+
+    def get_statistics(self):
+        node_statistics = self.get_frame_statistics()
+        edge_statistics = self.get_role_statistics()
+
+        return node_statistics, edge_statistics
+
+    def get_frame_statistics(self):
+        frame_types = {}
+        node_attrs = nx.get_node_attributes(self, "frame_type")
+        for frame_type in node_attrs.values():
+            if frame_type not in frame_types:
+                frame_types[frame_type] = 1
+            else:
+                frame_types[frame_type] += 1
+
+        return frame_types
+
+    def get_role_statistics(self):
+        role_types = {}
+        edge_attrs = nx.get_edge_attributes(self, "label")
+        for role_type in edge_attrs.values():
+
+            if role_type not in role_types:
+                role_types[role_type] = 1
+            else:
+                role_types[role_type] += 1
+
+        return role_types
 
 
 class AbstractionException(Exception):

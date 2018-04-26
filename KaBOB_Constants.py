@@ -69,6 +69,20 @@ DISJOINTWITH = get_full_uri('owl:disjointWith')
 LIST = get_full_uri('rdf:List')
 HAS_RANK = get_full_uri('ncbitaxon:has_rank')
 
+# KaBOB Nodes of Interest
+
+BP_root = get_full_uri('obo:GO_0008150')
+MF_root = get_full_uri('obo:GO_0003674')
+CC_root = get_full_uri('obo:GO_0005575')
+PRO_root = get_full_uri('obo:PR_000000001')
+localization_process = get_full_uri('obo:GO_0051179')
+binding_process = get_full_uri('obo:GO_0005488')
+interaction = get_full_uri('obo:MI_0000')
+physical_association = get_full_uri('obo:MI_0915')
+apoptotic_process = get_full_uri('obo:GO_0006915')
+p53 = get_full_uri('obo:PR_P04637')
+cytochrome_C = get_full_uri('obo:PR_P08574')
+
 # Ignore these relations when making slots
 
 CUSTOM_RELATIONS_TO_IGNORE = [DISJOINTWITH,

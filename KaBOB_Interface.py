@@ -33,7 +33,7 @@ class KaBOBInterface:
 
     KaBOB_IDs = "kabob_ids"
 
-    def __init__(self, credentials_file: str, max_depth=1000):
+    def __init__(self, credentials_file: str, max_depth=1000, cache_dir=None):
         self.credentials_file = credentials_file
         self.mops = MOPs()
         self.bio_world = None
@@ -41,8 +41,18 @@ class KaBOBInterface:
         self.max_depth = max_depth
         self.equivalent_classes: Dict[Value, Set(Value)] = dict()
 
-    def __enter__(self):
+        self.cache_dir = cache_dir
+        self.cached_statements = {}
+
         self.credentials = {}
+
+    def __enter__(self):
+        if self.cache_dir:
+            try:
+                self.cached_statements = pickle.load(open("%s/statements.pickle" % self.cache_dir, "rb"))
+                self.mops = pickle.load(open("%s/mops.pickle" % self.cache_dir, "rb"))
+            except FileNotFoundError:
+                pass
 
         with open(self.credentials_file) as f:
             for line in f.readlines():
@@ -68,6 +78,12 @@ class KaBOBInterface:
         self.log.debug("Closed AllegroGraph server --" +
                        "host:'%s' port:%s" % (self.credentials[self.HOST], self.credentials[self.PORT]))
 
+        if self.cache_dir:
+            pickle.dump(self.cached_statements,
+                        open("%s/statements.pickle" % self.cache_dir, "wb"))
+            pickle.dump(self.mops,
+                        open("%s/mops.pickle" % self.cache_dir, "wb"))
+
     """
     SETTERS
     """
@@ -87,7 +103,25 @@ class KaBOBInterface:
     MOPIFICATION
     """
 
-    def mopify(self, mop: str or URI, depth: int = 0, statements=None) -> URI or Literal or List[URI or Literal]:
+    def mopify_and_cache(self, mops: List[str or URI], number_of_mops_to_mopify=None):
+        if self.cache_dir:
+            count = 0
+            for node in mops:
+                self.log.debug("**************************** Mopify %d ****************************" % count)
+                if node not in self.mops:
+                    self.mopify(node, 0)
+
+                    self.log.debug("Caching results")
+                    pickle.dump(self.mops, open("%s/mops.pickle" % self.cache_dir, "wb"))
+                    # shutil.copyfile("%s/mops.pickle" % pickle_dir, "%s/mops_%d.pickle" % (pickle_dir, count))
+
+                count += 1
+                if count == number_of_mops_to_mopify:
+                    break
+        else:
+            self.log.warning("Cache directory not set")
+
+    def mopify(self, mop: str or URI, depth: int) -> URI or Literal or List[URI or Literal]:
         node: URI or Literal = mop \
             if isinstance(mop, URI) or isinstance(mop, Literal) \
             else self.create_uri(mop)
@@ -98,18 +132,19 @@ class KaBOBInterface:
             return node
         elif not self.is_bio(node):
             self.log.warning("\t" * depth + "Trivial mopification of non-BIO-world node %s" % node)
-            return self.create_kabob_mop(node, statements, depth, is_trivial=True)
+            return self.create_kabob_mop(node, depth, is_trivial=True)
         else:
-            return self.create_kabob_mop(node, statements, depth)
+            return self.create_kabob_mop(node, depth)
 
-    def create_kabob_mop(self, node: URI or Literal, node_statements: List, depth: int,
-                         is_trivial: bool = False) -> URI or Literal:
+    def create_kabob_mop(self, node: URI or Literal, depth: int, is_trivial: bool = False) -> URI or Literal:
 
         parents: List[Tuple[Value, List]] = list()
         slots: List[URI or Literal, str, URI or Literal] = list()
         labels: List[str] = list()
 
-        if not node_statements:
+        if node in self.cached_statements:
+            node_statements = self.cached_statements[node]
+        else:
             node_statements = self.get_statements(node)
 
         equivalent_class = None
@@ -136,9 +171,10 @@ class KaBOBInterface:
                 if is_restriction:
                     role = restriction_property
                     role_label = self.get_role_name(restriction_property)
-                    slots.append((role, role_label, self.mopify(restriction_value, depth + 1)))
+                    slots.append((role, role_label,
+                                  self.mopify(restriction_value, depth + 1)))
                 else:
-                    parents.append((o, parent_statements))
+                    parents.append(o)
 
             elif p.getURI() == KaBOB_Constants.LABEL and isinstance(o, Literal):
                 labels.append(str(o.getLabel()))
@@ -185,14 +221,16 @@ class KaBOBInterface:
             self.mops.add_frame(node, label=mop_name)
 
             if equivalent_class == node:
-                [self.mops.add_equivalent_frame(node, self.mopify(equivalent, depth + 1)) for equivalent in
+                [self.mops.add_equivalent_frame(node,
+                                                self.mopify(equivalent, depth + 1))
+                 for equivalent in
                  self.equivalent_classes[equivalent_class] if equivalent != node]
             else:
                 self.mops.add_equivalent_frame(node, equivalent_class)
 
-            [self.mops.add_abstraction(equivalent_class, self.mopify(parent, depth + 1, statements=parent_statements))
-             for parent, parent_statements in parents]
-            [self.mops.add_slot(equivalent_class, role, role_name, self.mopify(filler, depth + 1)) for
+            [self.mops.add_abstraction(equivalent_class, self.mopify(parent, depth + 1)) for parent in parents]
+            [self.mops.add_slot(equivalent_class, role, role_name,
+                                self.mopify(filler, depth + 1)) for
              role, role_name, filler in slots]
         else:
             self.mops.add_frame(node, label=mop_name)
@@ -239,15 +277,16 @@ class KaBOBInterface:
     GETTERS
     """
 
-    def get_bio_world(self, pickle_dir):
-        try:
-            self.bio_world = pickle.load(open("%s/bio_world.pickle" % pickle_dir, "rb"))
-        except FileNotFoundError:
-            self.log.warning("Collecting all bio world nodes")
-            self.bio_world = self.get_objects(None, KaBOB_Constants.DENOTES)
-            pickle.dump(self.bio_world, open("%s/bio_world.pickle" % pickle_dir, "wb"))
+    def get_bio_world(self):
+        if self.cache_dir:
+            try:
+                self.bio_world = pickle.load(open("%s/bio_world.pickle" % self.cache_dir, "rb"))
+            except FileNotFoundError:
+                self.log.warning("Collecting all bio world nodes")
+                self.bio_world = self.get_objects(None, KaBOB_Constants.DENOTES)
+                pickle.dump(self.bio_world, open("%s/bio_world.pickle" % self.cache_dir, "wb"))
 
-        return self.bio_world
+            return self.bio_world
 
     def get_instance_node_label(self, node: URI or Literal, labels: List) -> str:
         return "%s - " % self.get_node_label(self.get_node_type(node), labels)
@@ -296,7 +335,10 @@ class KaBOBInterface:
         p = self.get_value_from_str(p)
         o = self.get_value_from_str(o)
         with self.kabob.getStatements(subject=s, predicate=p, object=o) as statements:
-            return statements.asList()
+            statements = statements.asList()
+            if s and not p and not o:
+                self.cached_statements[s] = statements
+            return statements
 
     def get_value_from_str(self, value: URI or str or Literal):
         value = value if not value or isinstance(value, URI) or isinstance(value, Literal) else self.create_uri(value)
