@@ -19,6 +19,7 @@ class MOPs(nx.MultiDiGraph):
 
     def __init__(self, **attr):
         super().__init__(**attr)
+        self.abstraction_hierarchy = nx.MultiDiGraph()
 
     '''
     ADDERS
@@ -50,10 +51,12 @@ class MOPs(nx.MultiDiGraph):
                                                    nx.get_node_attributes(self, "label")[abstraction])
                     else:
                         self.add_edge(frame, abstraction, key=self.abstraction)
+                        self.get_abstraction_hierarchy().add_edge(frame, abstraction, key=self.abstraction)
                 except AbstractionException as ae:
                     self.log.warning(ae.message)
 
         else:
+            self.get_abstraction_hierarchy().add_edge(frame, abstraction, key=self.abstraction)
             self.add_edge(frame, abstraction, key=self.abstraction)
 
     '''
@@ -64,8 +67,7 @@ class MOPs(nx.MultiDiGraph):
         if abstraction == specialization:
             return True
 
-        abstraction_hierarchy = self.get_abstraction_hierarchy()
-        if abstraction in abstraction_hierarchy and specialization in abstraction_hierarchy:
+        if abstraction in self.get_abstraction_hierarchy() and specialization in self.get_abstraction_hierarchy():
             return nx.has_path(self.get_abstraction_hierarchy(), specialization, abstraction)
         else:
             return False
@@ -124,11 +126,14 @@ class MOPs(nx.MultiDiGraph):
         return [neighbor for neighbor in self.neighbors(frame) if self.has_edge(frame, neighbor, key=self.abstraction)]
 
     def get_abstraction_hierarchy(self):
-        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k == self.abstraction)
-        return self.edge_subgraph(edges)
+        if not self.abstraction_hierarchy:
+            edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k == self.abstraction)
+            # abstraction_hierarchy = self.edge_subgraph(edges)
+            self.abstraction_hierarchy.add_edges_from(edges)
+        return self.abstraction_hierarchy
 
     def get_slot_graph(self):
-        edges = ((u, v, k) for (u, v, k) in self.edges(keys=True) if k != self.abstraction and k != self.equivalent)
+        edges = ((u, v, k) for (u, v, k) in self.edges(data=True, keys=True) if k != self.abstraction and k != self.equivalent)
         return self.edge_subgraph(edges)
 
     def get_instances(self, abstraction, slots):
@@ -159,6 +164,7 @@ class MOPs(nx.MultiDiGraph):
     '''
 
     def draw_mops(self, image_dir: str, layout: Callable = nx.spring_layout, size: float = None):
+        self.log.debug("Drawing Mops")
         pos = layout(self)
         self.draw_graph(self, pos, "%s/full_graph.png" % image_dir, size=size)
         self.draw_graph(self.get_abstraction_hierarchy(), pos, "%s/abstraction_hierarchy.png" % image_dir, size=size)

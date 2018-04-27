@@ -12,15 +12,16 @@ def mopify_bio_world(image_dir, pickle_dir, num_nodes=None):
     with KaBOBInterface("KaBOB_credentials.txt", cache_dir=pickle_dir) as interface:
 
         bio_world = interface.get_bio_world()
+        interface.mopify_and_cache(bio_world, number_of_nodes_to_mopify=num_nodes, cache_every_iter=5000, separate_caches=True)
 
         # cache_thread = threading.Thread(target=cache_statements, args=(bio_world, bio_world_with_statements, interface, num_nodes, pickle_dir))
         # cache_statements(bio_world, bio_world_with_statements, interface, num_nodes, pickle_dir)
 
-        mopify_thread = threading.Thread(target=interface.mopify_and_cache, args=(bio_world, num_nodes))
+        # mopify_thread = threading.Thread(target=interface.mopify_and_cache, args=(bio_world, num_nodes))
         # mopify_statements(bio_world_with_statements, interface, num_nodes, pickle_dir)
 
         # cache_thread.start()
-        mopify_thread.start()
+        # mopify_thread.start()
 
     # log.debug("Drawing images")
     # interface.draw(image_dir, layout=nx.fruchterman_reingold_layout, size=100)
@@ -51,7 +52,7 @@ if __name__ == "__main__":
         if len(sys.argv) == 2:
             val = int(sys.argv[1])
         else:
-            val = 6520
+            val = 400000
         pickle_folder = "E:/Documents/KaBOB/pickles"
         image_folder = "E:/Documents/KaBOB/images"
 
