@@ -27,6 +27,12 @@ class InstanceAndSuperClassesException(Warning):
 class KaBOBInterface:
     log = logging.getLogger('KaBOBInterface')
 
+    BIO = ICE = OBO = OBOINOWL = CCP_EXT = CCP_BNODE = NCBITAXON = PART_OF = HAS_PART = DENOTES = HAS_PARTICIPANT = \
+        TRANSPORTS = CAUSES = XREF = ID = OBONAMESPACE = DEFINITION = EXACTSYNONYM = HAS_RANK = BP_root = MF_root = \
+        CC_root = PRO_root = localization_process = binding_process = interaction = physical_association = \
+        apoptotic_process = p53 = cytochrome_C = CUSTOM_RELATIONS_TO_IGNORE = NOT_A_SLOT = DC = DCTERMS = ERR = FN = \
+        FOAF = FTI = KEYWORD = ND = NDFN = SKOS = XS = XSD = None
+
     def __init__(self, credentials_file: str, max_depth=1000, cache_dir=None):
         """
         :param credentials_file: File containing the settings for accessing KaBOB
@@ -37,7 +43,7 @@ class KaBOBInterface:
         self.credentials_file = credentials_file
         self.mops = MOPs()
         self.bio_world = None
-        self.kabob: RepositoryConnection = None
+        self.conn: RepositoryConnection = None
         self.max_depth = min(max_depth, sys.getrecursionlimit())
         self.equivalent_classes: Dict[Value, Set(Value)] = dict()
 
@@ -45,39 +51,6 @@ class KaBOBInterface:
         self.cached_statements = {}
 
         self.credentials = {}
-
-        self.BIO = None
-        self.ICE = None
-        self.OBO = None
-        self.OBOINOWL = None
-        self.CCP_EXT = None
-        self.CCP_BNODE = None
-        self.NCBITAXON = None
-        self.PART_OF = None
-        self.HAS_PART = None
-        self.DENOTES = None
-        self.HAS_PARTICIPANT = None
-        self.TRANSPORTS = None
-        self.CAUSES = None
-        self.XREF = None
-        self.ID = None
-        self.OBONAMESPACE = None
-        self.DEFINITION = None
-        self.EXACTSYNONYM = None
-        self.HAS_RANK = None
-        self.BP_root = None
-        self.MF_root = None
-        self.CC_root = None
-        self.PRO_root = None
-        self.localization_process = None
-        self.binding_process = None
-        self.interaction = None
-        self.physical_association = None
-        self.apoptotic_process = None
-        self.p53 = None
-        self.cytochrome_C = None
-        self.CUSTOM_RELATIONS_TO_IGNORE = None
-        self.NOT_A_SLOT = None
 
     def __enter__(self):
         """
@@ -116,27 +89,41 @@ class KaBOBInterface:
         # Open connection to KaBOB using provided credentials
         self.log.debug("Connecting to KaBOB --" +
                        "host:'%s' port:%s" % (self.credentials[HOST], self.credentials[PORT]))
-        self.kabob = ag_connect(self.credentials[RELEASE],
-                                host=self.credentials[HOST],
-                                port=int(self.credentials[PORT]),
-                                user=self.credentials[USER],
-                                password=self.credentials[PASSWORD],
-                                create=False,
-                                clear=False)
+        self.conn = ag_connect(self.credentials[RELEASE],
+                               host=self.credentials[HOST],
+                               port=int(self.credentials[PORT]),
+                               user=self.credentials[USER],
+                               password=self.credentials[PASSWORD],
+                               create=False,
+                               clear=False)
 
+        self.initialize_namespaces()
+        self.initialize_relations()
         self.initialize_nodes()
 
         return self
 
-    def initialize_nodes(self):
-        self.BIO = self.kabob.namespace('bio')
-        self.ICE = self.kabob.namespace('ice')
-        self.OBO = self.kabob.namespace("http://purl.obolibrary.org/obo/")
-        self.OBOINOWL = self.kabob.namespace("http://www.geneontology.org/formats/oboInOwl#")
-        self.CCP_EXT = self.kabob.namespace("http://ccp.ucdenver.edu/obo/ext/")
-        self.CCP_BNODE = self.kabob.namespace("http://ccp.ucdenver.edu/bnode/")
-        self.NCBITAXON = self.kabob.namespace("http://purl.obolibrary.org/obo/ncbitaxon#")
+    def initialize_namespaces(self):
+        self.BIO = self.conn.namespace("http://ccp.ucdenver.edu/kabob/bio/")
+        self.CCP_BNODE = self.conn.namespace("http://ccp.ucdenver.edu/bnode/")
+        self.CCP_EXT = self.conn.namespace("http://ccp.ucdenver.edu/obo/ext/")
+        self.DC = self.conn.namespace("http://purl.org/dc/elements /11/")
+        self.DCTERMS = self.conn.namespace("http://purl.org/dc/terms/")
+        self.ERR = self.conn.namespace("http://www.w3.org/2005/xqt-errors#")
+        self.FN = self.conn.namespace("http://www.w3.org/2005 /xpath-functions#")
+        self.FOAF = self.conn.namespace("http://xmlns.com/foaf /01/")
+        self.FTI = self.conn.namespace("http://franz.com/ns/allegrograph/2.2/textindex/")
+        self.ICE = self.conn.namespace("http://ccp.ucdenver.edu/kabob/ice/")
+        self.KEYWORD = self.conn.namespace("http://franz.com/ns/keyword#")
+        self.ND = self.conn.namespace("http://franz.com/ns/allegrograph/5.0/geo/nd#")
+        self.NDFN = self.conn.namespace("http://franz.com/ns/allegrograph/5.0/geo/nd/fn#")
+        self.OBO = self.conn.namespace("http://purl.obolibrary.org/obo/")
+        self.OBOINOWL = self.conn.namespace("http://www.geneontology.org/formats/oboInOwl#")
+        self.SKOS = self.conn.namespace("http://www.w3.org/2004/02/skos/core#")
+        self.XS = self.conn.namespace("http://www.w3.org/2001/XMLSchema#")
+        self.XSD = self.conn.namespace("http://www.w3.org/2001/XMLSchema#")
 
+    def initialize_relations(self):
         self.PART_OF = self.OBO.BFO_0000050
         self.HAS_PART = self.OBO.BFO_0000051
         self.DENOTES = self.OBO.IAO_0000219
@@ -150,6 +137,7 @@ class KaBOBInterface:
         self.EXACTSYNONYM = self.OBOINOWL.hasExactSynonym
         self.HAS_RANK = self.NCBITAXON.has_rank
 
+    def initialize_nodes(self):
         # KaBOB Nodes of Interest
         self.BP_root = self.OBO.GO_0008150
         self.MF_root = self.OBO.GO_0003674
@@ -167,7 +155,7 @@ class KaBOBInterface:
         self.CUSTOM_RELATIONS_TO_IGNORE = [OWL.DISJOINTWITH,
                                            self.HAS_RANK,
                                            OWL.INTERSECTIONOF,
-                                           self.kabob.createURI(namespace=RDF.NAMESPACE, localname='subClassOf')]
+                                           self.conn.createURI(namespace=RDF.NAMESPACE, localname='subClassOf')]
         self.NOT_A_SLOT = [RDF.TYPE,
                            RDFS.SUBCLASSOF,
                            RDFS.LABEL,
@@ -188,7 +176,7 @@ class KaBOBInterface:
         :param traceback:
         :return: None
         """
-        self.kabob.close()
+        self.conn.close()
 
         self.log.debug("Closed KaBOB")
 
@@ -493,7 +481,7 @@ class KaBOBInterface:
         if s and not p and not o:
             statements = self.cached_statements.get(s)
         if not statements:
-            with self.kabob.getStatements(subject=s, predicate=p, object=o) as statements:
+            with self.conn.getStatements(subject=s, predicate=p, object=o) as statements:
                 statements = statements.asList()
                 if s and not p and not o:
                     self.cached_statements[s] = statements
