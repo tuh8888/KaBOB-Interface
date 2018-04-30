@@ -24,14 +24,16 @@ class InstanceAndSuperClassesException(Warning):
     pass
 
 
-class KaBOBInterface:
-    log = logging.getLogger('KaBOBInterface')
+class Interface:
+    log = logging.getLogger('Interface')
 
-    BIO = ICE = OBO = OBOINOWL = CCP_EXT = CCP_BNODE = NCBITAXON = PART_OF = HAS_PART = DENOTES = HAS_PARTICIPANT = \
-        TRANSPORTS = CAUSES = XREF = ID = OBONAMESPACE = DEFINITION = EXACTSYNONYM = HAS_RANK = BP_root = MF_root = \
-        CC_root = PRO_root = localization_process = binding_process = interaction = physical_association = \
-        apoptotic_process = p53 = cytochrome_C = CUSTOM_RELATIONS_TO_IGNORE = NOT_A_SLOT = DC = DCTERMS = ERR = FN = \
-        FOAF = FTI = KEYWORD = ND = NDFN = SKOS = XS = XSD = None
+    HOST = "HOST"
+    PORT = "PORT"
+    USER = "USER"
+    PASSWORD = "PASSWORD"
+    CATALOG = "CATALOG"
+    RELEASE = "RELEASE"
+    INSTANCE_RELEASE = "INSTANCE_RELEASE"
 
     def __init__(self, credentials_file: str, max_depth=1000, cache_dir=None):
         """
@@ -40,9 +42,10 @@ class KaBOBInterface:
         :param cache_dir: Directory to save results to. Some methods cache results as they go
         :return: Self
         """
+        self.NOT_A_SLOT = [RDF.TYPE, RDFS.SUBCLASSOF, RDFS.LABEL, OWL.EQUIVALENTCLASS]
         self.credentials_file = credentials_file
         self.mops = MOPs()
-        self.bio_world = None
+
         self.conn: RepositoryConnection = None
         self.max_depth = min(max_depth, sys.getrecursionlimit())
         self.equivalent_classes: Dict[Value, Set(Value)] = dict()
@@ -50,7 +53,17 @@ class KaBOBInterface:
         self.cache_dir = cache_dir
         self.cached_statements = {}
 
-        self.credentials = {}
+        # Attempt to load cached statements and mops
+        if self.cache_dir:
+            try:
+                print("Reading cached statements")
+                self.cached_statements = pickle.load(open("%s/statements.pickle" % self.cache_dir, "rb"))
+                print("Reading cached mops")
+                graph: nx.MultiDiGraph = pickle.load(open("%s/mops.pickle" % self.cache_dir, "rb"))
+                self.mops.add_nodes_from(graph.nodes(data=True))
+                self.mops.add_edges_from(graph.edges(data=True))
+            except FileNotFoundError:
+                pass
 
     def __enter__(self):
         """
@@ -59,41 +72,33 @@ class KaBOBInterface:
         :return: The interface
         """
 
-        HOST = "HOST"
-        PORT = "PORT"
-        USER = "USER"
-        PASSWORD = "PASSWORD"
-        # noinspection PyUnusedLocal
-        CATALOG = "CATALOG"
-        RELEASE = "RELEASE"
-        # noinspection PyUnusedLocal
-        INSTANCE_RELEASE = "INSTANCE_RELEASE"
+        self.connect_to_kabob()
 
-        # Attempt to load cached statements and mops
-        if self.cache_dir:
-            try:
-                self.cached_statements = pickle.load(open("%s/statements.pickle" % self.cache_dir, "rb"))
-                graph: nx.MultiDiGraph = pickle.load(open("%s/mops.pickle" % self.cache_dir, "rb"))
-                self.mops.add_nodes_from(graph.nodes(data=True))
-                self.mops.add_edges_from(graph.edges(data=True))
-            except FileNotFoundError:
-                pass
+        return self
+
+    def get_credentials(self):
+        credentials = {}
 
         # Read credentials file
         with open(self.credentials_file) as f:
             for line in f.readlines():
                 key_value = line.strip().split(':')
                 if len(key_value) == 2:
-                    self.credentials[key_value[0]] = key_value[1]
+                    credentials[key_value[0]] = key_value[1]
+
+        return credentials
+
+    def connect_to_kabob(self):
+        credentials = {}
 
         # Open connection to KaBOB using provided credentials
-        self.log.debug("Connecting to KaBOB --" +
-                       "host:'%s' port:%s" % (self.credentials[HOST], self.credentials[PORT]))
-        self.conn = ag_connect(self.credentials[RELEASE],
-                               host=self.credentials[HOST],
-                               port=int(self.credentials[PORT]),
-                               user=self.credentials[USER],
-                               password=self.credentials[PASSWORD],
+        self.log.debug("Connecting to repository --" +
+                       "host:'%s' port:%s" % (credentials[self.HOST], credentials[self.PORT]))
+        self.conn = ag_connect(credentials[self.RELEASE],
+                               host=credentials[self.HOST],
+                               port=int(credentials[self.PORT]),
+                               user=credentials[self.USER],
+                               password=credentials[self.PASSWORD],
                                create=False,
                                clear=False)
 
@@ -101,81 +106,16 @@ class KaBOBInterface:
         self.initialize_relations()
         self.initialize_nodes()
 
-        return self
-
     def initialize_namespaces(self):
-        self.BIO = self.conn.namespace("http://ccp.ucdenver.edu/kabob/bio/")
-        self.CCP_BNODE = self.conn.namespace("http://ccp.ucdenver.edu/bnode/")
-        self.CCP_EXT = self.conn.namespace("http://ccp.ucdenver.edu/obo/ext/")
-        self.DC = self.conn.namespace("http://purl.org/dc/elements /11/")
-        self.DCTERMS = self.conn.namespace("http://purl.org/dc/terms/")
-        self.ERR = self.conn.namespace("http://www.w3.org/2005/xqt-errors#")
-        self.FN = self.conn.namespace("http://www.w3.org/2005 /xpath-functions#")
-        self.FOAF = self.conn.namespace("http://xmlns.com/foaf /01/")
-        self.FTI = self.conn.namespace("http://franz.com/ns/allegrograph/2.2/textindex/")
-        self.ICE = self.conn.namespace("http://ccp.ucdenver.edu/kabob/ice/")
-        self.KEYWORD = self.conn.namespace("http://franz.com/ns/keyword#")
-        self.ND = self.conn.namespace("http://franz.com/ns/allegrograph/5.0/geo/nd#")
-        self.NDFN = self.conn.namespace("http://franz.com/ns/allegrograph/5.0/geo/nd/fn#")
-        self.OBO = self.conn.namespace("http://purl.obolibrary.org/obo/")
-        self.OBOINOWL = self.conn.namespace("http://www.geneontology.org/formats/oboInOwl#")
-        self.SKOS = self.conn.namespace("http://www.w3.org/2004/02/skos/core#")
-        self.XS = self.conn.namespace("http://www.w3.org/2001/XMLSchema#")
-        self.XSD = self.conn.namespace("http://www.w3.org/2001/XMLSchema#")
+        pass
 
     def initialize_relations(self):
-        self.PART_OF = self.OBO.BFO_0000050
-        self.HAS_PART = self.OBO.BFO_0000051
-        self.DENOTES = self.OBO.IAO_0000219
-        self.HAS_PARTICIPANT = self.OBO.RO_0000057
-        self.TRANSPORTS = self.OBO.RO_0002313
-        self.CAUSES = self.OBO.RO_0003302
-        self.XREF = self.OBOINOWL.hasDbXref
-        self.ID = self.OBOINOWL.id
-        self.OBONAMESPACE = self.OBOINOWL.hasOBONamespace
-        self.DEFINITION = self.OBO.IAO_0000115
-        self.EXACTSYNONYM = self.OBOINOWL.hasExactSynonym
-        self.HAS_RANK = self.NCBITAXON.has_rank
+        pass
 
     def initialize_nodes(self):
-        # KaBOB Nodes of Interest
-        self.BP_root = self.OBO.GO_0008150
-        self.MF_root = self.OBO.GO_0003674
-        self.CC_root = self.OBO.GO_0005575
-        self.PRO_root = self.OBO.PR_000000001
-        self.localization_process = self.OBO.GO_0051179
-        self.binding_process = self.OBO.GO_0005488
-        self.interaction = self.OBO.MI_0000
-        self.physical_association = self.OBO.MI_0915
-        self.apoptotic_process = self.OBO.GO_0006915
-        self.p53 = self.OBO.PR_P04637
-        self.cytochrome_C = self.OBO.PR_P08574
+        pass
 
-        # Ignore these relations when making slots
-        self.CUSTOM_RELATIONS_TO_IGNORE = [OWL.DISJOINTWITH,
-                                           self.HAS_RANK,
-                                           OWL.INTERSECTIONOF,
-                                           self.conn.createURI(namespace=RDF.NAMESPACE, localname='subClassOf')]
-        self.NOT_A_SLOT = [RDF.TYPE,
-                           RDFS.SUBCLASSOF,
-                           RDFS.LABEL,
-                           self.XREF,
-                           self.ID,
-                           self.DEFINITION,
-                           self.EXACTSYNONYM,
-                           RDFS.COMMENT,
-                           self.OBONAMESPACE,
-                           OWL.EQUIVALENTCLASS,
-                           self.DENOTES] + self.CUSTOM_RELATIONS_TO_IGNORE
-
-    def __exit__(self, t, value, traceback):
-        """
-        Called when the "with" statement concludes. Safely closes connection to KaBOB and caches results
-        :param t:
-        :param value:
-        :param traceback:
-        :return: None
-        """
+    def close(self):
         self.conn.close()
 
         self.log.debug("Closed KaBOB")
@@ -185,6 +125,17 @@ class KaBOBInterface:
                         open("%s/statements.pickle" % self.cache_dir, "wb"))
             pickle.dump(self.mops,
                         open("%s/mops.pickle" % self.cache_dir, "wb"))
+
+    def __exit__(self, t, value, traceback):
+        """
+        Called when the "with" statement concludes. Safely closes connection to KaBOB and caches results
+        :param t:
+        :param value:
+        :param traceback:
+        :return: None
+        """
+
+        self.close()
 
     """
     SETTERS
@@ -270,7 +221,7 @@ class KaBOBInterface:
         if node in self.mops:  # No need to mopify if it has already been mopified
             return node
         else:
-            is_trivial = not self.is_bio(node)
+            is_trivial = self.is_node_trivial(node)
             if is_trivial:
                 self.log.warning("\t" * depth + "Trivial mopification of non-BIO-world node %s" % node)
             mop_label, parents, slots, node_type, equivalent_class = self.parse_statements(node, is_trivial)
@@ -305,7 +256,7 @@ class KaBOBInterface:
         :return:
         """
 
-        if parents and self.is_bio_instance(node, node_type):
+        if parents and self.is_instance(node, node_type):
             warnings.warn("\t" * depth + str(mop_label) + " is an instance and a subClass")
 
         self.mops.add_frame(node, label=mop_label)
@@ -321,7 +272,7 @@ class KaBOBInterface:
                                        self.mopify(parent, depth=depth + 1)) for parent in parents]
             [self.mops.add_slot(equivalent_class,
                                 role,
-                                self.get_role_name(role),
+                                self.get_label(role),
                                 self.mopify(filler, depth=depth + 1)) for role, filler in slots]
 
     def parse_statements(self, node: Value, is_trivial: bool) -> Tuple[
@@ -345,7 +296,7 @@ class KaBOBInterface:
             p = statement.getPredicate()
 
             if not is_trivial:
-                if p.getURI() == RDFS.SUBCLASSOF:
+                if p == RDFS.SUBCLASSOF:
                     # Here, we check to see if the parent is a restriction.
                     # If it is, we add it as a slot.
                     # Otherwise, we add it as a parent.
@@ -355,13 +306,13 @@ class KaBOBInterface:
                     else:
                         parents.append(o)
 
-                elif p.getURI() not in self.NOT_A_SLOT:
+                elif p not in self.NOT_A_SLOT:
                     slots.append((p, o))
 
-            if p.getURI() == RDFS.LABEL and isinstance(o, Literal):
+            if p == RDFS.LABEL and isinstance(o, Literal):
                 labels.append(str(o.getLabel()))
 
-            elif p.getURI() == OWL.EQUIVALENTCLASS:
+            elif p == OWL.EQUIVALENTCLASS:
                 if not equivalent_class:
                     for key, classes in self.equivalent_classes.items():
                         if o in classes:
@@ -378,17 +329,17 @@ class KaBOBInterface:
                 else:
                     self.equivalent_classes[equivalent_class].add(o)
 
-            elif p.getURI() == RDF.TYPE:
+            elif p == RDF.TYPE:
                 node_type = o
 
         if not equivalent_class:
             self.equivalent_classes[node] = {node}
             equivalent_class = node
 
-        if self.is_bio_instance(node, node_type):
+        if self.is_instance(node, node_type):
             mop_label: str = self.get_instance_node_label(node, labels)
         else:
-            mop_label: str = self.get_node_label(node, labels)
+            mop_label: str = self.get_label(node, labels)
 
         return mop_label, parents, slots, node_type, equivalent_class
 
@@ -400,12 +351,12 @@ class KaBOBInterface:
         for parent_statement in parent_statements:
             parent_o = parent_statement.getObject()
             parent_p = parent_statement.getPredicate()
-            if parent_p.getURI() == RDF.TYPE:
-                if parent_o.getURI() == OWL.RESTRICTION:
+            if parent_p == RDF.TYPE:
+                if parent_o == OWL.RESTRICTION:
                     is_restriction = True
-            elif parent_p.getURI() == OWL.ONPROPERTY:
+            elif parent_p == OWL.ONPROPERTY:
                 restriction_property = parent_o
-            elif parent_p.getURI() == OWL.SOMEVALUESFROM:
+            elif parent_p == OWL.SOMEVALUESFROM:
                 restriction_value = parent_o
         return is_restriction, restriction_property, restriction_value
 
@@ -413,41 +364,28 @@ class KaBOBInterface:
     CHECKERS
     """
 
-    def is_bio_instance(self, node: Value, node_type) -> bool:
-        return self.is_bio(node) and node_type
+    def is_node_trivial(self, node: Value) -> bool:
+        return False
 
-    def is_bio(self, node: Value) -> bool:
-        return isinstance(node, URI) and node.getNamespace() == self.BIO
-
-    def is_ice(self, node: Value) -> bool:
-        return isinstance(node, URI) and \
-               node.getNamespace() == self.ICE
+    def is_instance(self, node: Value, node_type) -> bool:
+        return node_type
 
     """
     GETTERS
     """
 
-    def get_bio_world(self):
-        if self.cache_dir:
-            try:
-                self.bio_world = pickle.load(open("%s/bio_world.pickle" % self.cache_dir, "rb"))
-            except FileNotFoundError:
-                self.log.warning("Collecting all bio world nodes")
-                self.bio_world = self.get_objects(None, self.DENOTES)
-                pickle.dump(self.bio_world, open("%s/bio_world.pickle" % self.cache_dir, "wb"))
-
-            return self.bio_world
-
     def get_instance_node_label(self, node: URI or Literal, labels: List) -> str:
-        return "%s - " % self.get_node_label(self.get_node_type(node), labels)
+        return "%s - " % self.get_label(self.get_node_type(node), labels)
 
-    @staticmethod
-    def get_node_label(node: URI or Literal, labels: List) -> str:
+    def get_label(self, node: URI or Literal, labels: List = None) -> str:
         local_name = node
         if isinstance(node, URI):
             local_name = node.getLocalName()
         elif isinstance(node, Literal):
             local_name = node.getLabel()
+
+        if not labels:
+            labels = [str(o.getLabel()) for o in self.get_objects(node, RDFS.LABEL)]
 
         def find_lowercase_label(_labels):
             for label in _labels:
@@ -490,21 +428,6 @@ class KaBOBInterface:
     def get_node_type(self, node: Value) -> URI or Literal:
         return self.get_object(s=node, p=RDF.TYPE)
 
-    def get_bio(self, node: URI) -> Value:
-        if self.is_ice(node):
-            return self.get_ice_to_bio(node)
-        else:
-            subjects = self.get_subjects(o=node, p=self.DENOTES)
-            for subject in subjects:
-                if self.is_ice(subject):
-                    return self.get_ice_to_bio(subject)
-
-    def get_ice_to_bio(self, node: Value) -> Value:
-        objects = self.get_objects(s=node, p=self.DENOTES)
-        for _object in objects:
-            if self.is_bio(_object):
-                return _object
-
     def get_list_from_rdf(self, node: URI or Literal, depth: int) -> List[URI or Literal]:
         first = self.get_object(s=node, p=RDF.FIRST)
         rest = self.get_object(s=node, p=RDF.REST)
@@ -517,12 +440,6 @@ class KaBOBInterface:
         else:
             self.log.warning("\t" * depth + "List has no first: %s" % node)
             return []
-
-    def get_role_name(self, node: URI or Literal) -> str:
-        return self.get_node_label(node, self.get_labels(node))
-
-    def get_labels(self, node: URI or Literal):
-        return [str(o.getLabel()) for o in self.get_objects(node, RDFS.LABEL)]
 
     def get_equivalent_classes(self, node: Value) -> List[Value]:
         return self.get_objects(s=node, p=OWL.EQUIVALENTCLASS)

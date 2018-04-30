@@ -42,4 +42,4 @@ class TestMOPsManager(TestCase):
 
         manager.add_frame("thing")
 
-        manager.draw_mops()
+        manager.draw_mops("E:/Documents/Test")
