@@ -72,7 +72,7 @@ class Interface:
         :return: The interface
         """
 
-        self.connect_to_kabob()
+        self.connect_to_repository()
 
         return self
 
@@ -88,8 +88,8 @@ class Interface:
 
         return credentials
 
-    def connect_to_kabob(self):
-        credentials = {}
+    def connect_to_repository(self):
+        credentials = self.get_credentials()
 
         # Open connection to KaBOB using provided credentials
         self.log.debug("Connecting to repository --" +
