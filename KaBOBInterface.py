@@ -55,6 +55,21 @@ class KaBOBInterface(Interface):
         self.DEFINITION = self.OBO.IAO_0000115
         self.EXACTSYNONYM = self.OBOINOWL.hasExactSynonym
 
+        HAS_RANK = self.get_node("ncbitaxon#has_rank")
+        ONLY_IN_TAXON = self.get_bio_node(self.OBO.RO_0002160)
+
+        CUSTOM_RELATIONS_TO_IGNORE = [OWL.DISJOINTWITH,
+                                      HAS_RANK,
+                                      OWL.INTERSECTIONOF,
+                                      self.conn.createURI(namespace=RDF.NAMESPACE, localname='subClassOf'),
+                                      self.XREF, self.ID, self.DEFINITION,
+                                      self.EXACTSYNONYM, RDFS.COMMENT, self.OBONAMESPACE,
+                                      self.DENOTES]
+
+        self.mops.add_special_node_attribute(ONLY_IN_TAXON, self.get_label(ONLY_IN_TAXON))
+
+        self.NOT_A_SLOT.extend(CUSTOM_RELATIONS_TO_IGNORE)
+
     def initialize_nodes(self):
         # KaBOB Nodes of Interest
         self.BP_root = self.OBO.GO_0008150
@@ -69,15 +84,7 @@ class KaBOBInterface(Interface):
         self.p53 = self.OBO.PR_P04637
         self.cytochrome_C = self.OBO.PR_P08574
 
-        CUSTOM_RELATIONS_TO_IGNORE = [OWL.DISJOINTWITH,
-                                      self.get_node("ncbiaxon#has_rank"),
-                                      OWL.INTERSECTIONOF,
-                                      self.conn.createURI(namespace=RDF.NAMESPACE, localname='subClassOf'),
-                                      self.XREF, self.ID, self.DEFINITION,
-                                      self.EXACTSYNONYM, RDFS.COMMENT, self.OBONAMESPACE,
-                                      self.DENOTES]
 
-        self.NOT_A_SLOT.extend(CUSTOM_RELATIONS_TO_IGNORE)
 
     """
     CHECKERS

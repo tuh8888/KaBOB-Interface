@@ -58,10 +58,18 @@ class Interface:
             try:
                 print("Reading cached statements")
                 self.cached_statements = pickle.load(open("%s/statements.pickle" % self.cache_dir, "rb"))
+                self.equivalent_classes: Dict = pickle.load(open("%s/equivalent_classes.pickle" % self.cache_dir, "rb"))
+
                 print("Reading cached mops")
-                graph: nx.MultiDiGraph = pickle.load(open("%s/mops.pickle" % self.cache_dir, "rb"))
-                self.mops.add_nodes_from(graph.nodes(data=True))
-                self.mops.add_edges_from(graph.edges(data=True))
+                self.mops: MOPs = pickle.load(open("%s/mops.pickle" % self.cache_dir, "rb"))
+                print()
+                # abstractions: nx.DiGraph = pickle.load(open("%s/abstractions.pickle" % self.cache_dir, "rb"))
+                # self.mops.abstractions.add_nodes_from(abstractions.nodes(data=True))
+                # self.mops.abstractions.add_edges_from(abstractions.edges(data=True))
+                #
+                # slots: nx.MultiDiGraph = pickle.load(open("%s/slots.pickle" % self.cache_dir, "rb"))
+                # self.mops.slots.add_nodes_from(slots.nodes(data=True))
+                # self.mops.slots.add_edges_from(slots.edges(data=True))
             except FileNotFoundError:
                 pass
 
@@ -123,6 +131,8 @@ class Interface:
         if self.cache_dir:
             pickle.dump(self.cached_statements,
                         open("%s/statements.pickle" % self.cache_dir, "wb"))
+            pickle._dump(self.equivalent_classes,
+                        open("%s/equivalent_classes.pickle" % self.cache_dir, "wb"))
             pickle.dump(self.mops,
                         open("%s/mops.pickle" % self.cache_dir, "wb"))
 
@@ -185,7 +195,7 @@ class Interface:
             count = 0
             for node in nodes:
                 self.log.debug("**************************** Mopify %d ****************************" % count)
-                if node not in self.mops:
+                if node not in self.mops.abstractions               :
                     self.mopify(node, depth=0)
 
                     if cache_every_iter and count % cache_every_iter == 0:
@@ -218,7 +228,7 @@ class Interface:
 
         # Convert node to URI
 
-        if node in self.mops:  # No need to mopify if it has already been mopified
+        if node in self.mops.abstractions:  # No need to mopify if it has already been mopified
             return node
         else:
             is_trivial = self.is_node_trivial(node)
@@ -262,11 +272,11 @@ class Interface:
         self.mops.add_frame(node, label=mop_label)
 
         if not is_trivial or depth < self.max_depth:
-            if equivalent_class == node:
-                [self.mops.add_equivalent_frame(node, self.mopify(equivalent, depth=depth + 1))
-                 for equivalent in self.equivalent_classes[equivalent_class] if equivalent != node]
-            else:
-                self.mops.add_equivalent_frame(node, equivalent_class)
+            # if equivalent_class == node:
+            #     [self.mops.add_equivalent_frame(node, self.mopify(equivalent, depth=depth + 1))
+            #      for equivalent in self.equivalent_classes[equivalent_class] if equivalent != node]
+            # else:
+            #     self.mops.add_equivalent_frame(node, equivalent_class)
 
             [self.mops.add_abstraction(equivalent_class,
                                        self.mopify(parent, depth=depth + 1)) for parent in parents]
