@@ -131,7 +131,7 @@ class Interface:
         if self.cache_dir:
             pickle.dump(self.cached_statements,
                         open("%s/statements.pickle" % self.cache_dir, "wb"))
-            pickle._dump(self.equivalent_classes,
+            pickle.dump(self.equivalent_classes,
                         open("%s/equivalent_classes.pickle" % self.cache_dir, "wb"))
             pickle.dump(self.mops,
                         open("%s/mops.pickle" % self.cache_dir, "wb"))
@@ -195,7 +195,7 @@ class Interface:
             count = 0
             for node in nodes:
                 self.log.debug("**************************** Mopify %d ****************************" % count)
-                if node not in self.mops.abstractions               :
+                if node not in self.mops.abstractions:
                     self.mopify(node, depth=0)
 
                     if cache_every_iter and count % cache_every_iter == 0:

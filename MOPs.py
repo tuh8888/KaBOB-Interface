@@ -172,24 +172,25 @@ class MOPs:
         self.draw_graph(self.abstractions, pos, "%s/abstraction_hierarchy.png" % image_dir, size=size)
         self.draw_graph(self.slots, pos, "%s/slot_graph.png" % image_dir, size=size)
 
-    def draw_graph(self, G: nx.Graph, pos, out_loc: str, size: float = None):
+    def draw_graph(self, G: nx.Graph, pos, out_loc: str, size: float = None, node_labels=None, edge_labels=None):
         if G.nodes:
             if size is None:
                 size = math.sqrt(G.number_of_nodes() * G.number_of_edges()) / 2
+            if node_labels is None:
+                node_labels = dict()
+                for n, d in self.abstractions.nodes(data=True):
+                    if n in G:
+                        label = str(d.get(self.attribute_label, n))
+                        # for key, value in d.items():
+                        #     if key in self.special_node_attributes.values():
+                        #         label += "\n%s" % str(value)
+                        node_labels[n] = label
+            if edge_labels is None:
+                edge_labels = dict([((u, v), d[self.attribute_label]) for u, v, d in G.edges(data=True) if
+                                    self.attribute_label in d.keys()])
             plt.figure(None, figsize=(size, size))
 
-            labels = dict()
-            for n, d in self.abstractions.nodes(data=True):
-                label = str(d.get(self.attribute_label, n))
-                # for key, value in d.items():
-                #     if key in self.special_node_attributes.values():
-                #         label += "\n%s" % str(value)
-                labels[n] = label
-
-            edge_labels = dict([((u, v), d[self.attribute_label]) for u, v, d in G.edges(data=True) if
-                                self.attribute_label in d.keys()])
-
-            nx.draw(G, pos, labels=labels, with_labels=True)
+            nx.draw(G, pos, labels=node_labels, with_labels=True)
             nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
 
             plt.savefig(out_loc)
@@ -227,6 +228,12 @@ class MOPs:
                 role_types[role_type] += 1
 
         return role_types
+
+    """
+    COLLAPSING
+    """
+
+
 
 
 class AbstractionException(Exception):
