@@ -1,6 +1,7 @@
 import logging
 import pickle
 
+from KaBOB_SPARQL_QUERY import KaBOBSPARQLQuery
 from franz.openrdf.model import URI
 from franz.openrdf.model import Value
 from franz.openrdf.vocabulary import RDF, RDFS, OWL
@@ -15,7 +16,7 @@ class KaBOBInterface(Interface):
         TRANSPORTS = CAUSES = XREF = ID = OBONAMESPACE = DEFINITION = EXACTSYNONYM = BP_root = MF_root = \
         CC_root = PRO_root = localization_process = binding_process = interaction = physical_association = \
         apoptotic_process = p53 = cytochrome_C = CUSTOM_RELATIONS_TO_IGNORE = NOT_A_SLOT = DC = DCTERMS = ERR = FN = \
-        FOAF = FTI = KEYWORD = ND = NDFN = SKOS = XS = XSD = None
+        FOAF = FTI = KEYWORD = ND = NDFN = SKOS = XS = XSD = drugbank_identifier = reactome_identifier = None
 
     def __init__(self, credentials_file: str, max_depth=1000, cache_dir=None):
         super().__init__(credentials_file, max_depth=max_depth, cache_dir=cache_dir)
@@ -43,6 +44,7 @@ class KaBOBInterface(Interface):
         self.OBO = self.conn.namespace("http://purl.obolibrary.org/obo/")
 
     def initialize_relations(self):
+        super(KaBOBInterface, self).initialize_relations()
         self.PART_OF = self.OBO.BFO_0000050
         self.HAS_PART = self.OBO.BFO_0000051
         self.DENOTES = self.OBO.IAO_0000219
@@ -71,6 +73,7 @@ class KaBOBInterface(Interface):
         self.NOT_A_SLOT.extend(CUSTOM_RELATIONS_TO_IGNORE)
 
     def initialize_nodes(self):
+        super(KaBOBInterface, self).initialize_relations()
         # KaBOB Nodes of Interest
         self.BP_root = self.OBO.GO_0008150
         self.MF_root = self.OBO.GO_0003674
@@ -83,6 +86,8 @@ class KaBOBInterface(Interface):
         self.apoptotic_process = self.OBO.GO_0006915
         self.p53 = self.OBO.PR_P04637
         self.cytochrome_C = self.OBO.PR_P08574
+        self.drugbank_identifier = self.CCP_EXT.IAO_EXT_0001309
+        self.reactome_identifier = self.CCP_EXT.IAO_EXT_0001643
 
 
 
@@ -147,3 +152,75 @@ class KaBOBInterface(Interface):
                 node = getattr(namespace, local_name)
 
         return node
+
+    def get_drugbank_drug(self, drugbank_id):
+        return self.get_bio_node("ice:DRUGBANK_" + drugbank_id)
+
+    def get_drug_targets(self, drug_bank_id):
+        drug = self.get_drugbank_drug(drug_bank_id)
+        binding = self.get_bio_node("GO_0005488")
+        has_participant = self.get_bio_node(self.HAS_PARTICIPANT)
+        inheres_in = self.get_bio_node("RO_0000052")
+
+        drug_sc = "drug_sc"
+        inheres = "inheres"
+        interaction = "interaction"
+        target_sc = "target_sc"
+        target = "target"
+
+        selections = [target]
+
+        query = KaBOBSPARQLQuery(self)
+
+        query.make_triple(drug_sc, RDFS.SUBCLASSOF, drug)
+        query.apply_restriction(svf=drug_sc, op=has_participant, targets=[interaction])
+        query.apply_restriction(svf=drug_sc, op=inheres_in, targets=[inheres])
+        query.make_triple(interaction, RDFS.SUBCLASSOF, binding)
+        query.apply_restriction(svf=target_sc, op=has_participant, targets=[interaction])
+        query.make_triple(target_sc, RDFS.SUBCLASSOF, target)
+
+        query.add_filter(target, "!=", drug)
+
+        query.set_selections(selections)
+
+        result = query.run(self.conn)
+
+        return [binding_set.getValue(selection) for binding_set in result for selection in selections]
+
+    def mopify_pathway(self, pathway_node):
+        # immediately_preceded_by_uri = "ice:RO_0002087"
+        # immediately_preceded_by_bio = self.get_bio_node(immediately_preceded_by_uri)
+
+        proper_part_restr = self.get_subjects(p=self.ONCLASS, o=pathway_node)
+        bcr1 = self.get_subjects(p=RDFS.SUBCLASSOF, o=proper_part_restr)
+        self.mopify(pathway_node)
+        [self.mopify(bcr) for bcr in bcr1]
+
+    def get_all_drugs(self):
+        db_id_scs = self.get_subjects(o=self.drugbank_identifier, p=RDFS.SUBCLASSOF)
+        return [self.get_bio_node(db_id_sc) for db_id_sc in db_id_scs]
+
+    def get_all_pathways(self):
+        reactome_ice_id = "reactome_ice_id"
+        pathway = "pathway"
+        selections = [pathway]
+
+        query = KaBOBSPARQLQuery(self)
+        query.make_triple(reactome_ice_id, RDFS.SUBCLASSOF, self.reactome_identifier)
+        query.make_triple(reactome_ice_id, self.DENOTES, pathway)
+        query.set_selections(selections)
+
+        result = query.run(self.conn)
+        return [binding_set.getValue(selection) for binding_set in result for selection in selections]
+
+
+def test_with_lipitor():
+    with KaBOBInterface("KaBOB_credentials.txt") as interface:
+        lipitor = "DB01076"
+        targets = interface.get_drug_targets(lipitor)
+        for target in targets:
+            print(target)
+
+
+if __name__ == "__main__":
+    test_with_lipitor()

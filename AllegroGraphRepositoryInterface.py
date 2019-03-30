@@ -35,6 +35,8 @@ class Interface:
     RELEASE = "RELEASE"
     INSTANCE_RELEASE = "INSTANCE_RELEASE"
 
+    ONCLASS = None
+
     def __init__(self, credentials_file: str, max_depth=1000, cache_dir=None):
         """
         :param credentials_file: File containing the settings for accessing KaBOB
@@ -118,6 +120,7 @@ class Interface:
         pass
 
     def initialize_relations(self):
+        self.ONCLASS = self.conn.createURI(namespace=OWL.NAMESPACE, localname="onClass")
         pass
 
     def initialize_nodes(self):
@@ -286,7 +289,7 @@ class Interface:
                                 self.mopify(filler, depth=depth + 1)) for role, filler in slots]
 
     def parse_statements(self, node: Value, is_trivial: bool) -> Tuple[
-            str, List[Value], List[Tuple[Value, Value]], Value, Value]:
+        str, List[Value], List[Tuple[Value, Value]], Value, Value]:
         """
         Parse triples with node as the subject
         :param node:
@@ -366,8 +369,9 @@ class Interface:
                     is_restriction = True
             elif parent_p == OWL.ONPROPERTY:
                 restriction_property = parent_o
-            elif parent_p == OWL.SOMEVALUESFROM:
+            elif parent_p == OWL.SOMEVALUESFROM or parent_p == self.ONCLASS:
                 restriction_value = parent_o
+
         return is_restriction, restriction_property, restriction_value
 
     """
@@ -406,7 +410,12 @@ class Interface:
         if labels:
             return find_lowercase_label(labels) or labels[0]
         else:
-            return str(local_name)
+            label = str(local_name)
+            if len(label) >= 15 and ' ' not in label:
+                for parent in self.get_objects(s=node, p=RDFS.SUBCLASSOF):
+                    if not self.check_restriction(parent)[0]:
+                        return "subclass of " + self.get_label(parent)
+            return label
 
     def get_objects(self, s: Value or None, p: URI or None) -> List[URI or Literal]:
         statements = self.get_statements(s=s, p=p)
